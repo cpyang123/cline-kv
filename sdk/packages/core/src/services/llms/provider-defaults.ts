@@ -141,6 +141,27 @@ async function loadGeneratedProviderModels(): Promise<
 	return Llms.getGeneratedProviderModels();
 }
 
+/**
+ * A live model list carries ids and names only. When the provider bundles a
+ * curated entry for the same id (a gateway's priced market snapshot, as
+ * opposed to the stub synthesized for a missing default), keep the live id
+ * but take the bundled metadata: context window, output cap, pricing.
+ */
+function enrichLiveModels(
+	liveModels: Record<string, ModelInfo>,
+	bundled: Record<string, ModelInfo>,
+): Record<string, ModelInfo> {
+	return Object.fromEntries(
+		Object.entries(liveModels).map(([id, live]) => {
+			const entry = bundled[id];
+			const curated =
+				entry !== undefined &&
+				(entry.pricing !== undefined || entry.maxTokens !== undefined);
+			return [id, curated ? { ...live, ...entry, id } : live];
+		}),
+	);
+}
+
 async function mergeKnownModels(
 	providerId: string,
 	defaultKnownModels: Record<string, ModelInfo> = {},
@@ -173,7 +194,7 @@ async function mergeKnownModels(
 	);
 	if (hasPublicModelSource) {
 		return Llms.sortModelsByReleaseDate({
-			...publicModels,
+			...enrichLiveModels(publicModels, defaultKnownModels),
 			...userKnownModels,
 		});
 	}

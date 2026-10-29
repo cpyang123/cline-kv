@@ -647,6 +647,55 @@ describe("resolveProviderConfig", () => {
 		expect(Object.keys(resolved?.knownModels ?? {})).toEqual(["local-llama"]);
 	});
 
+	it("enriches a gateway's live model market with its bundled priced snapshot", async () => {
+		const fetchMock = vi.fn(async () => {
+			return new Response(
+				JSON.stringify({
+					data: [
+						{ id: "auto" },
+						{ id: "claude-sonnet-5" },
+						{ id: "brand-new-offer" },
+					],
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const resolved = await resolveProviderConfig(
+			"goodvision",
+			{ failOnError: false, cacheTtlMs: 0 },
+			{ providerId: "goodvision", modelId: "auto", apiKey: "gv_test_key" },
+		);
+
+		// The key's market is fetched with its Bearer token from the provider's own origin.
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const [url, init] = fetchMock.mock.calls[0] as unknown as [
+			string,
+			RequestInit,
+		];
+		expect(url).toBe("https://api-test.goodvision.tech/v1/models");
+		expect(new Headers(init.headers).get("authorization")).toBe(
+			"Bearer gv_test_key",
+		);
+
+		// Live ids are authoritative (the bundled snapshot's other ids are absent) …
+		const models = resolved?.knownModels ?? {};
+		expect(Object.keys(models).sort()).toEqual([
+			"auto",
+			"brand-new-offer",
+			"claude-sonnet-5",
+		]);
+		// … and a live id the snapshot knows carries the snapshot's metadata.
+		expect(models["claude-sonnet-5"]).toMatchObject({
+			contextWindow: 200_000,
+			maxTokens: 64_000,
+			pricing: { input: 2, output: 10 },
+		});
+		expect(models.auto).toMatchObject({ contextWindow: 200_000 });
+		expect(models["brand-new-offer"]?.pricing).toBeUndefined();
+	});
+
 	it("loads Poolside models from the authenticated models endpoint", async () => {
 		const fetchMock = vi.fn(async () => {
 			return new Response(
