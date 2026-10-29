@@ -3,6 +3,7 @@ import { BrainIcon, ChevronDownIcon, ChevronRightIcon, LoaderCircleIcon } from "
 import { useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
+import { NoteView } from "../knowledge-vault/NoteView"
 
 export function parseKnowledgeVaultInfo(text: string | undefined): ClineKnowledgeVaultInfo | undefined {
 	if (!text) {
@@ -79,9 +80,15 @@ export const KnowledgeVaultRow = ({ message }: { message: ClineMessage }) => {
 			</button>
 			{expanded && canExpand && (
 				<div className="mb-2 ml-5 rounded-xs border border-editor-widget-border/50 bg-editor-background/40 p-2">
-					<pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-foreground/90">
-						{info.body}
-					</pre>
+					<div className="max-h-96 overflow-auto">
+						{info.status === "failed" ? (
+							<pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-foreground/90">
+								{info.body}
+							</pre>
+						) : (
+							<NoteView recall={info.kind === "recall"} text={info.body ?? ""} />
+						)}
+					</div>
 					<div className="mt-2 flex items-center gap-3 text-[11px] text-description">
 						{info.model && (
 							<span>

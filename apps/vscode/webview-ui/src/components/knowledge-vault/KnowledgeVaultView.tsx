@@ -8,6 +8,7 @@ import { useExtensionState } from "@/context/ExtensionStateContext"
 import { KnowledgeVaultServiceClient } from "@/services/grpc-client"
 import { formatKnowledgeVaultLabel, parseKnowledgeVaultInfo } from "../chat/KnowledgeVaultRow"
 import ViewHeader from "../common/ViewHeader"
+import { NoteView } from "./NoteView"
 
 interface KnowledgeVaultViewProps {
 	onDone: () => void
@@ -25,6 +26,7 @@ const MemoryBlock = ({
 	title,
 	meta,
 	body,
+	kind = "note",
 	defaultOpen = false,
 	muted = false,
 	actions,
@@ -32,6 +34,8 @@ const MemoryBlock = ({
 	title: string
 	meta?: string
 	body?: string
+	/** How to render the body: a single note, a recalled body with labels, or plain text. */
+	kind?: "note" | "recall" | "text"
 	defaultOpen?: boolean
 	muted?: boolean
 	actions?: React.ReactNode
@@ -54,9 +58,15 @@ const MemoryBlock = ({
 				{actions}
 			</div>
 			{open && canOpen && (
-				<pre className="m-0 max-h-80 overflow-auto whitespace-pre-wrap break-words border-t border-editor-widget-border/50 px-2 py-2 font-mono text-[11px] leading-snug text-foreground/90">
-					{body}
-				</pre>
+				<div className="max-h-96 overflow-auto border-t border-editor-widget-border/50 px-2 py-2">
+					{kind === "text" ? (
+						<pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-foreground/90">
+							{body}
+						</pre>
+					) : (
+						<NoteView recall={kind === "recall"} text={body ?? ""} />
+					)}
+				</div>
 			)}
 		</div>
 	)
@@ -163,6 +173,7 @@ const KnowledgeVaultView = ({ onDone }: KnowledgeVaultViewProps) => {
 							<MemoryBlock
 								body={info.body}
 								key={`${ts}-${info.kind}`}
+								kind={info.status === "failed" ? "text" : info.kind === "recall" ? "recall" : "note"}
 								meta={formatWhen(ts)}
 								muted={info.status === "running"}
 								title={formatKnowledgeVaultLabel(info)}

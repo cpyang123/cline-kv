@@ -42,6 +42,13 @@ describe("KnowledgeVaultRow", () => {
 		expect(screen.queryByText(/FILES: src\/a.ts/)).toBeNull()
 
 		fireEvent.click(screen.getByRole("button", { expanded: false }))
+		// Structured by category: the FILES tag with its path chip, the DID text with its WHERE anchor.
+		expect(screen.getByText("FILES")).toBeTruthy()
+		expect(screen.getByText("src/a.ts")).toBeTruthy()
+		expect(screen.getByText("x")).toBeTruthy()
+		expect(screen.getByText("src/a.ts:1")).toBeTruthy()
+		// The raw text stays one click away.
+		fireEvent.click(screen.getByText("Show raw text"))
 		expect(screen.getByText(/FILES: src\/a.ts/)).toBeTruthy()
 
 		fireEvent.click(screen.getByText("Open Memory view"))
