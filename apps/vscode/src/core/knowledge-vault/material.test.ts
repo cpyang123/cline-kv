@@ -65,6 +65,13 @@ describe("stripInjectedContext", () => {
 			"task",
 		)
 	})
+
+	it("removes the extension's user_input envelope around a prompt", () => {
+		expect(stripInjectedContext('<user_input mode="act">Create a site</user_input>')).toBe("Create a site")
+		expect(firstUserPrompt([message("user", [{ type: "text", text: '<user_input mode="plan">Plan it</user_input>' }])])).toBe(
+			"Plan it",
+		)
+	})
 })
 
 describe("firstUserPrompt / predicates", () => {

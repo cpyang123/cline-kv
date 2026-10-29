@@ -27,10 +27,12 @@ export const DEFAULT_MATERIAL_CAPS: MaterialCaps = {
 
 const HOOK_CONTEXT_BLOCK = /<hook_context\b[^>]*>[\s\S]*?<\/hook_context>/g
 const MEMORY_CONTEXT_BLOCK = /<memory_context>[\s\S]*?<\/memory_context>/g
+/** The extension wraps each prompt in a `<user_input mode="…">` envelope; it is not part of the task. */
+const USER_INPUT_ENVELOPE = /<\/?user_input\b[^>]*>/g
 
-/** Remove injected hook / memory blocks so a note never distills earlier notes. */
+/** Remove injected hook / memory blocks (so a note never distills earlier notes) and prompt envelopes. */
 export function stripInjectedContext(text: string): string {
-	return text.replace(HOOK_CONTEXT_BLOCK, "").replace(MEMORY_CONTEXT_BLOCK, "").trim()
+	return text.replace(HOOK_CONTEXT_BLOCK, "").replace(MEMORY_CONTEXT_BLOCK, "").replace(USER_INPUT_ENVELOPE, "").trim()
 }
 
 function isSystemDisplayMessage(message: AgentMessage): boolean {

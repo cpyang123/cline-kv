@@ -149,8 +149,8 @@
 			},
 			{
 				"command": "cline.knowledgeVaultButtonClicked",
-				"title": "Memory (Knowledge Vault)",
-				"icon": "$(book)"
+				"title": "Memory",
+				"icon": "$(database)"
 			},
 			{
 				"command": "cline.accountButtonClicked",

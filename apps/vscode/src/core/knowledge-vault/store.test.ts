@@ -32,6 +32,7 @@ describe("vault paths and rendering", () => {
 	it("labels notes by date and the task's first line", () => {
 		expect(noteLabel(note())).toBe("2026-10-29 Fix the login redirect")
 		expect(noteLabel(note({ task: "x".repeat(100) }))).toBe(`2026-10-29 ${"x".repeat(77)}...`)
+		expect(noteLabel(note({ task: '<user_input mode="act">Create a site</user_input>' }))).toBe("2026-10-29 Create a site")
 	})
 
 	it("renders labelled notes and keeps only the most recent 30K characters", () => {

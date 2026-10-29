@@ -35,7 +35,9 @@ export function resolveKnowledgeVaultPath(workspaceRoot: string): string {
 
 export function noteLabel(note: KnowledgeVaultNote): string {
 	const date = Number.isFinite(note.ts) ? new Date(note.ts).toISOString().slice(0, 10) : ""
-	const firstLine = note.task.split("\n")[0]?.trim() ?? ""
+	// Notes written before envelopes were stripped at write time still carry them.
+	const task = note.task.replace(/<\/?user_input\b[^>]*>/g, "").trim()
+	const firstLine = task.split("\n")[0]?.trim() ?? ""
 	const short = firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine
 	return [date, short].filter(Boolean).join(" ")
 }
