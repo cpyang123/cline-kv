@@ -134,6 +134,13 @@ export interface GatewayProviderMetadata {
 	 * generic OpenAI-compatible adapter exposes.
 	 */
 	imageTransport?: "openrouter";
+	/**
+	 * `prompt`: the endpoint rejects native tool definitions (e.g. GoodVision's
+	 * SmartRouter under its default policy), so tools are described in the
+	 * prompt and the model's `<tool_call>` text is parsed back into tool
+	 * calls (see `promptToolsMiddleware` in `@cline/llms`).
+	 */
+	toolTransport?: "prompt";
 	/** Provider-owned implementation used for the transcription operation. */
 	transcriptionTransport?:
 		| "openai-native"

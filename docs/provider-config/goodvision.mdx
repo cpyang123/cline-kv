@@ -19,7 +19,13 @@ The provider also reads the `GOODVISION_API_KEY` environment variable when no ke
 - Routing is decided by the policy bound to the key in the console; the request itself cannot steer it. Each response carries the served model in its `model` field and in the `x-gv-selected-model` header.
 - The SmartRouter returns standard OpenAI `usage` (prompt and completion tokens) but no cost. Cline prices requests with a snapshot of list prices for the known market models; the router's usage page in the console is the authoritative bill. Requests on `auto` are not priced because the served model varies.
 
+## Tool calling through the prompt
+
+Under its default routing policy the SmartRouter refuses any request that declares tools (every model answers `422 no_candidate`), while the same request without tools succeeds. Cline's agent loop needs tools on every request, so the GoodVision provider carries the `toolTransport: "prompt"` flag: tool definitions are moved out of the request and described in the system prompt, the model writes calls as `<tool_call>{"name": …, "arguments": {…}}</tool_call>` blocks, and the provider layer turns those back into native tool calls before the agent loop sees them. Tool results travel back as `<tool_result>` text. This is the same text-based protocol the team's ChainSWE harness uses on this key.
+
+It works with every model that follows the format reliably (the Claude and GPT ids in the market do). Should GoodVision enable a tool-capable offer for the key, removing the flag from the provider spec restores native tool calling.
+
 ## Current limitations
 
-- The router does not mask upstream failures: if a model family is unavailable upstream, requests to it fail rather than fall back. A policy that routes coding prompts to such a family makes `auto` fail for agent runs; pin a working model id instead.
-- Some routing policies admit no model offer for requests that declare tools and answer them with `422 no_candidate`. Cline's agent loop declares tools on every request, so such a key cannot drive tasks until GoodVision enables a tool-capable offer for the policy. Tool-free calls still work, which is why the [Knowledge Vault](/features/knowledge-vault) can use the SmartRouter as its note writer independently of the task's provider.
+- The router does not mask upstream failures: if a model is unavailable upstream, requests to it fail rather than fall back. Pin a working model id if `auto` routes to one that is down.
+- Prompt-based tool calling is a text protocol: a model that writes a malformed block gets the parse error back as a tool error and usually corrects itself, but there is no provider-side validation of arguments.

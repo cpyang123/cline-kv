@@ -1095,6 +1095,9 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		modelsSourceUrl: `${GOODVISION_TEST_BASE_URL}/models`,
 		defaults: { baseUrl: GOODVISION_TEST_BASE_URL },
 		modelsFactory: buildGoodVisionModels,
+		// The router's routing policy admits no model offer for requests that
+		// declare tools (422 no_candidate), so tools go through the prompt.
+		metadata: { toolTransport: "prompt" },
 	},
 	{
 		id: "litellm",

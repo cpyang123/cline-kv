@@ -9,6 +9,7 @@ import { modelProducesImages } from "@cline/shared";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { wrapLanguageModel } from "ai";
 import { ensureFetch, resolveApiKey } from "../http";
+import { promptToolsMiddleware } from "../middleware/prompt-tools";
 import { splitToolImagesMiddleware } from "../middleware/split-tool-images";
 import { isOpenAIReasoningEraModelId } from "../model-facts";
 import type { ProviderFactoryResult } from "./types";
@@ -294,7 +295,13 @@ export async function createOpenAICompatibleProviderModule(
 				wrapLanguageModel({
 					model: (openRouterImageProvider?.chat(modelId) ??
 						provider(modelId)) as LanguageModelV4,
-					middleware: splitToolImagesMiddleware,
+					// `toolTransport: "prompt"` endpoints refuse native tool
+					// definitions: tools are emulated through the prompt first,
+					// so no tool messages remain for the image split to handle.
+					middleware:
+						context.provider.metadata?.toolTransport === "prompt"
+							? [promptToolsMiddleware, splitToolImagesMiddleware]
+							: splitToolImagesMiddleware,
 				}),
 			imageGeneration: (modelId) =>
 				vercelGateway
