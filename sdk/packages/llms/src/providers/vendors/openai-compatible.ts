@@ -88,6 +88,118 @@ function createAzureApiVersionFetch(
 
 type ResponseErrorHandler = (response: Response) => Promise<void> | void;
 
+export interface UpstreamRetryPolicy {
+	attempts: number;
+	baseDelayMs: number;
+	maxDelayMs?: number;
+}
+
+const UPSTREAM_RETRY_STATUSES = new Set([502, 503, 504]);
+
+function readUpstreamRetryPolicy(
+	metadata: Record<string, unknown> | undefined,
+): UpstreamRetryPolicy | undefined {
+	const policy = metadata?.upstreamRetry as
+		| Partial<UpstreamRetryPolicy>
+		| undefined;
+	if (
+		!policy ||
+		typeof policy.attempts !== "number" ||
+		policy.attempts < 2 ||
+		typeof policy.baseDelayMs !== "number"
+	) {
+		return undefined;
+	}
+	return {
+		attempts: policy.attempts,
+		baseDelayMs: policy.baseDelayMs,
+		...(typeof policy.maxDelayMs === "number"
+			? { maxDelayMs: policy.maxDelayMs }
+			: {}),
+	};
+}
+
+function isReplayableBody(body: unknown): boolean {
+	return body === undefined || body === null || typeof body === "string";
+}
+
+function abortableDelay(
+	ms: number,
+	signal: AbortSignal | null | undefined,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(signal.reason ?? new Error("aborted"));
+			return;
+		}
+		const timer = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(signal?.reason ?? new Error("aborted"));
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
+}
+
+/**
+ * Retry 502/503/504 responses with exponential backoff. Only requests whose
+ * body can be re-sent (a string or none) are retried, the abort signal cuts the
+ * wait short, and the last response is returned when attempts run out so the
+ * caller's own error handling sees the real status.
+ */
+export function createUpstreamRetryFetch(
+	baseFetch: typeof fetch,
+	policy: UpstreamRetryPolicy,
+	sleep: (
+		ms: number,
+		signal: AbortSignal | null | undefined,
+	) => Promise<void> = abortableDelay,
+): typeof fetch {
+	const retryFetch = (async (input, init) => {
+		const signal = (init?.signal ??
+			(input instanceof Request ? input.signal : undefined)) as
+			| AbortSignal
+			| null
+			| undefined;
+		let response = await baseFetch(input, init);
+		if (
+			!isReplayableBody(init?.body) ||
+			(input instanceof Request && init?.body === undefined && input.body)
+		) {
+			return response;
+		}
+		for (
+			let attempt = 1;
+			attempt < policy.attempts && UPSTREAM_RETRY_STATUSES.has(response.status);
+			attempt += 1
+		) {
+			if (signal?.aborted) {
+				return response;
+			}
+			const delay = Math.min(
+				policy.baseDelayMs * 2 ** (attempt - 1),
+				policy.maxDelayMs ?? Number.POSITIVE_INFINITY,
+			);
+			try {
+				await sleep(delay, signal);
+			} catch {
+				return response;
+			}
+			response = await baseFetch(input, init);
+		}
+		return response;
+	}) as typeof fetch;
+	const baseFetchWithPreconnect = baseFetch as FetchWithOptionalPreconnect;
+	(retryFetch as FetchWithOptionalPreconnect).preconnect =
+		typeof baseFetchWithPreconnect.preconnect === "function"
+			? baseFetchWithPreconnect.preconnect.bind(baseFetch)
+			: () => undefined;
+	return retryFetch;
+}
+
 function resolveVercelGatewayImageBaseUrl(
 	baseUrl: string | undefined,
 ): string | undefined {
@@ -235,12 +347,16 @@ export async function createOpenAICompatibleProviderModule(
 	const apiKey = await resolveApiKey(config);
 	const fetch = createAzureApiVersionFetch(config);
 	const onResponseError = readResponseErrorHandler(config);
+	const upstreamRetry = readUpstreamRetryPolicy(context.provider.metadata);
+	const retryingFetch = upstreamRetry
+		? createUpstreamRetryFetch(ensureFetch(fetch), upstreamRetry)
+		: fetch;
 	const providerFetch = onResponseError
 		? createResponseErrorFetch({
-				fetch: ensureFetch(fetch),
+				fetch: ensureFetch(retryingFetch),
 				onResponseError,
 			})
-		: fetch;
+		: retryingFetch;
 	const provider = createOpenAICompatible({
 		name: context.provider.id,
 		apiKey,

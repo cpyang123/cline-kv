@@ -141,6 +141,17 @@ export interface GatewayProviderMetadata {
 	 * calls (see `promptToolsMiddleware` in `@cline/llms`).
 	 */
 	toolTransport?: "prompt";
+	/**
+	 * Retry responses with status 502/503/504 at the fetch layer with
+	 * exponential backoff, for gateways that pass upstream outages straight
+	 * through and recover within seconds (GoodVision's SmartRouter). Applies on
+	 * top of the AI SDK's own request-start retries.
+	 */
+	upstreamRetry?: {
+		attempts: number;
+		baseDelayMs: number;
+		maxDelayMs?: number;
+	};
 	/** Provider-owned implementation used for the transcription operation. */
 	transcriptionTransport?:
 		| "openai-native"

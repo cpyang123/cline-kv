@@ -27,5 +27,5 @@ It works with every model that follows the format reliably (the Claude and GPT i
 
 ## Current limitations
 
-- The router does not mask upstream failures: if a model is unavailable upstream, requests to it fail rather than fall back. Pin a working model id if `auto` routes to one that is down.
+- The router does not mask upstream failures: if a model is unavailable upstream, requests to it answer 502 `upstream_unavailable` rather than fall back. Cline retries those responses with backoff (five attempts over about a minute, on top of the SDK's own retries), which rides out the router's short blips; a sustained outage still fails the request. Pin a working model id if `auto` keeps routing to one that is down.
 - Prompt-based tool calling is a text protocol: a model that writes a malformed block gets the parse error back as a tool error and usually corrects itself, but there is no provider-side validation of arguments.

@@ -1097,7 +1097,12 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		modelsFactory: buildGoodVisionModels,
 		// The router's routing policy admits no model offer for requests that
 		// declare tools (422 no_candidate), so tools go through the prompt.
-		metadata: { toolTransport: "prompt" },
+		metadata: {
+			toolTransport: "prompt",
+			// Upstream outages are passed through as 502 and often clear within
+			// seconds; ride them out before failing a task.
+			upstreamRetry: { attempts: 5, baseDelayMs: 5_000, maxDelayMs: 30_000 },
+		},
 	},
 	{
 		id: "litellm",
