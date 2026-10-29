@@ -477,7 +477,10 @@ const DEFAULT_PROVIDER_ID = "cline"
  * the user never installed (e.g. an Ollama Cloud nemotron model).
  */
 function providerHasLocalModelSource(providerId: string): boolean {
-	return Boolean(MODEL_COLLECTIONS_BY_PROVIDER_ID[toSdkProviderId(providerId)]?.provider.modelsSourceUrl)
+	const modelsSourceUrl = MODEL_COLLECTIONS_BY_PROVIDER_ID[toSdkProviderId(providerId)]?.provider.modelsSourceUrl
+	// Remote gateways with a live market (GoodVision's `/v1/models`) keep their
+	// catalog default (`auto`); only local servers have no meaningful default.
+	return Boolean(modelsSourceUrl) && isLocalNetworkUrl(modelsSourceUrl)
 }
 
 export function getDefaultModelIdForProvider(providerId: string): string | undefined {

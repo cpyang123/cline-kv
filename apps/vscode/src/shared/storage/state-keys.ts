@@ -11,6 +11,15 @@ import { BrowserSettings, DEFAULT_BROWSER_SETTINGS } from "@shared/BrowserSettin
 import { ClineRulesToggles } from "@shared/cline-rules"
 import type { CloudTaskTargetSelection, RememberedCloudStatuses } from "@shared/cloud/cloud-sessions"
 import { HistoryItem } from "@shared/HistoryItem"
+import {
+	DEFAULT_KNOWLEDGE_VAULT_ENABLED,
+	DEFAULT_KNOWLEDGE_VAULT_TEMPLATE,
+	DEFAULT_KNOWLEDGE_VAULT_WRITE_MODE,
+	DEFAULT_KNOWLEDGE_VAULT_WRITER,
+	type KnowledgeVaultTemplate,
+	type KnowledgeVaultWriteMode,
+	type KnowledgeVaultWriter,
+} from "@shared/knowledge-vault"
 import { DEFAULT_MCP_DISPLAY_MODE, McpDisplayMode } from "@shared/McpDisplayMode"
 import { toLegacyApiProvider } from "@shared/model-catalog/provider-helpers"
 import { GlobalInstructionsFile } from "@shared/remote-config/schema"
@@ -281,6 +290,11 @@ const USER_SETTINGS_FIELDS = {
 	defaultTerminalProfile: { default: "default" as string },
 	hooksEnabled: { default: true as boolean },
 	useAutoCondense: { default: true as boolean },
+	// Knowledge Vault (cross-session repository memory): toggle, note template, writer model
+	knowledgeVaultEnabled: { default: DEFAULT_KNOWLEDGE_VAULT_ENABLED as boolean },
+	knowledgeVaultTemplate: { default: DEFAULT_KNOWLEDGE_VAULT_TEMPLATE as KnowledgeVaultTemplate },
+	knowledgeVaultWriter: { default: DEFAULT_KNOWLEDGE_VAULT_WRITER as KnowledgeVaultWriter },
+	knowledgeVaultWriteMode: { default: DEFAULT_KNOWLEDGE_VAULT_WRITE_MODE as KnowledgeVaultWriteMode },
 	subagentsEnabled: { default: false as boolean },
 	worktreesEnabled: { default: false as boolean },
 	cloudSessionsEnabled: { default: false as boolean },

@@ -44,6 +44,10 @@ export async function getStateToPostToWebview(controller: {
 	const preferredLanguage = stateManager.getGlobalSettingsKey("preferredLanguage")
 	const mode = stateManager.getGlobalSettingsKey("mode")
 	const useAutoCondense = stateManager.getGlobalSettingsKey("useAutoCondense")
+	const knowledgeVaultEnabled = stateManager.getGlobalSettingsKey("knowledgeVaultEnabled")
+	const knowledgeVaultTemplate = stateManager.getGlobalSettingsKey("knowledgeVaultTemplate")
+	const knowledgeVaultWriter = stateManager.getGlobalSettingsKey("knowledgeVaultWriter")
+	const knowledgeVaultWriteMode = stateManager.getGlobalSettingsKey("knowledgeVaultWriteMode")
 	const compactionStrategy = readCompactionStrategyGlobally()
 	const webSearchEnabled = isModelToolEnabledGlobally("web_search")
 	const subagentsEnabled = stateManager.getGlobalSettingsKey("subagentsEnabled")
@@ -124,6 +128,10 @@ export async function getStateToPostToWebview(controller: {
 		preferredLanguage,
 		mode,
 		useAutoCondense,
+		knowledgeVaultEnabled,
+		knowledgeVaultTemplate,
+		knowledgeVaultWriter,
+		knowledgeVaultWriteMode,
 		compactionStrategy,
 		webSearchEnabled,
 		subagentsEnabled,

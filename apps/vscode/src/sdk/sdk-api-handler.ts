@@ -90,6 +90,13 @@ export interface BuildApiHandlerOptions {
 	 */
 	disableReasoning?: boolean
 	/**
+	 * Sampling temperature for this handler's requests (the Knowledge Vault writer
+	 * pins 0, as the harness does). Undefined keeps the model default.
+	 */
+	temperature?: number
+	/** Output cap for this handler's requests (the Knowledge Vault writer pins 900). */
+	maxOutputTokens?: number
+	/**
 	 * Host client identity used to build the Cline surface headers. Resolving it
 	 * needs an async hostbridge round-trip, so callers that can await should use
 	 * `buildApiHandlerWithHostContext`; when omitted we fall back to the
@@ -150,6 +157,8 @@ export function buildSdkProviderConfig(
 		// ignore an explicit Request Timeout setting and load models with
 		// Ollama's 4096-token server default.
 		...(providerId === "ollama" ? resolveOllamaProviderConfig(configuration, modelId) : {}),
+		...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+		...(options?.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
 	}
 
 	if (options?.disableReasoning) {

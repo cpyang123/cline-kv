@@ -110,6 +110,14 @@ const GENERIC_PROVIDER_PRESENTATION_OVERRIDES: Record<string, GenericProviderPre
 	aiand: {
 		signupUrl: "https://console.aiand.com/",
 	},
+	goodvision: {
+		allowsCustomIds: true,
+		signupUrl: "https://console-test.goodvision.tech/console/router-settings",
+		baseUrlField: {
+			label: "Base URL",
+			placeholder: "https://api-test.goodvision.tech/v1 (production: https://api.goodvision.tech/v1)",
+		},
+	},
 	"zai-coding-plan": {},
 }
 
@@ -173,6 +181,7 @@ const FALLBACK_GENERIC_PROVIDER_NAMES = {
 	"tencent-tokenhub": "Tencent TokenHub",
 	chutes: "Chutes",
 	aiand: "ai&",
+	goodvision: "GoodVision SmartRouter",
 	"zai-coding-plan": "Z.AI Coding Plan",
 } as const
 

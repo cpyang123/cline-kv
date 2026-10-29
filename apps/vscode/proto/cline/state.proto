@@ -289,6 +289,10 @@ message Settings {
   optional OpenRouterModelInfo act_mode_cline_pass_model_info = 186;
   optional bool cloud_sessions_enabled = 188;
   optional string open_telemetry_traces_exporter = 189;
+  optional bool knowledge_vault_enabled = 190;
+  optional string knowledge_vault_template = 191;
+  optional string knowledge_vault_writer = 192;
+  optional string knowledge_vault_write_mode = 193;
 }
 
 message State {
@@ -434,6 +438,10 @@ message UpdateSettingsRequest {
   optional string compaction_strategy = 44;
   optional bool web_search_enabled = 45;
   optional bool cloud_sessions_enabled = 46;
+  optional bool knowledge_vault_enabled = 47;
+  optional string knowledge_vault_template = 48;
+  optional string knowledge_vault_writer = 49;
+  optional string knowledge_vault_write_mode = 50;
 }
 
 message UpdateTerminalConnectionTimeoutRequest {

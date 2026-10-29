@@ -120,6 +120,16 @@ npm install @cline/sdk
 
 ---
 
+
+## Cline KV: Knowledge Vault and GoodVision
+
+This fork adds two things to Cline, both switchable from the settings UI:
+
+- **Knowledge Vault** (Settings → Features → Knowledge Vault): cross-session repository memory, defaulting to the `v5knote` arm of `knowledge-vault-project@chainswe-v5-note-arm`. After each completed task a writer call distills the session into one two-block note (FILES / STATUS / VERIFY / DID + CONTEXT) with the branch's prompt and caps; the workspace's notes are injected into the first turn of later tasks. Notes are stored in `.cline/knowledge-vault/notes.jsonl` inside the workspace. The toggle applies to the next run; sub-settings choose the note template (v5 two-block or the paper's v3 fused notes), the write mode (separate call or the later in-session `v5inline`) and the writer (task model or GoodVision SmartRouter). See `docs/features/knowledge-vault.mdx`.
+- **GoodVision SmartRouter provider** (Settings → API Configuration → GoodVision SmartRouter): GoodVision's OpenAI-compatible gateway with policy-driven routing (`auto`) and a live model market in the picker. Defaults to the test host; set the base URL to `https://api.goodvision.tech/v1` for production. See `docs/provider-config/goodvision.mdx`.
+
+Code: `apps/vscode/src/core/knowledge-vault/` (vault, writer, hooks), `sdk/packages/llms/src/providers/builtins.ts` (provider spec).
+
 ## Index
 
 | Product | Description | Location | CHANGELOG |

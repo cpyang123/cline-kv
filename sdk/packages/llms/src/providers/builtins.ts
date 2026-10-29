@@ -107,6 +107,210 @@ export type {
 	ProviderFamily,
 } from "./builtin-types";
 
+// ---------------------------------------------------------------------------
+// GoodVision SmartRouter
+// ---------------------------------------------------------------------------
+//
+// GoodVision exposes an OpenAI-compatible gateway (`/v1/chat/completions`,
+// `/v1/models`, Bearer auth). The routing policy bound to the API key picks the
+// served model when the request names `auto`; any other id must match the
+// account's model market verbatim. Two environments exist with separate keys:
+// the test host (where evaluation keys are issued) and production. The static
+// market below is a snapshot (2026-10-22) used for pricing/context metadata;
+// the live `/v1/models` list (fetched with the configured key through
+// `modelsSourceUrl`) is authoritative for which ids the key may use.
+
+export const GOODVISION_TEST_BASE_URL = "https://api-test.goodvision.tech/v1";
+export const GOODVISION_PROD_BASE_URL = "https://api.goodvision.tech/v1";
+export const GOODVISION_AUTO_MODEL_ID = "auto";
+export const GOODVISION_CONSOLE_URL =
+	"https://console-test.goodvision.tech/console/router-settings";
+
+interface GoodVisionMarketEntry {
+	id: string;
+	name: string;
+	family?: string;
+	contextWindow: number;
+	maxTokens: number;
+	/** USD per 1M tokens (list prices; the router's usage page is the bill). */
+	pricing?: { input: number; output: number; cacheRead?: number };
+}
+
+const GOODVISION_CLAUDE_OPUS_PRICING = { input: 5, output: 25, cacheRead: 0.5 };
+
+export const GOODVISION_MARKET_SNAPSHOT: readonly GoodVisionMarketEntry[] = [
+	{
+		id: GOODVISION_AUTO_MODEL_ID,
+		name: "SmartRouter auto (policy picks the model per request)",
+		// The policy may route to any market model, so advertise the most
+		// restrictive limits of the market to keep context management safe.
+		contextWindow: 200_000,
+		maxTokens: 32_000,
+	},
+	{
+		id: "claude-opus-5",
+		name: "Claude Opus 5",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: GOODVISION_CLAUDE_OPUS_PRICING,
+	},
+	{
+		id: "claude-opus-4-8",
+		name: "Claude Opus 4.8",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: GOODVISION_CLAUDE_OPUS_PRICING,
+	},
+	{
+		id: "claude-opus-4-7",
+		name: "Claude Opus 4.7",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: GOODVISION_CLAUDE_OPUS_PRICING,
+	},
+	{
+		id: "claude-opus-4-6",
+		name: "Claude Opus 4.6",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: GOODVISION_CLAUDE_OPUS_PRICING,
+	},
+	{
+		id: "claude-opus-4-5",
+		name: "Claude Opus 4.5",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: GOODVISION_CLAUDE_OPUS_PRICING,
+	},
+	{
+		id: "claude-sonnet-5",
+		name: "Claude Sonnet 5",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: { input: 2, output: 10, cacheRead: 0.2 },
+	},
+	{
+		id: "claude-sonnet-4-6",
+		name: "Claude Sonnet 4.6",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: { input: 3, output: 15, cacheRead: 0.3 },
+	},
+	{
+		id: "claude-sonnet-4-5",
+		name: "Claude Sonnet 4.5",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: { input: 3, output: 15, cacheRead: 0.3 },
+	},
+	{
+		id: "claude-haiku-4-5",
+		name: "Claude Haiku 4.5",
+		family: "claude",
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		pricing: { input: 1, output: 5, cacheRead: 0.1 },
+	},
+	{
+		id: "gpt-5.5",
+		name: "GPT-5.5",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 5, output: 30, cacheRead: 0.5 },
+	},
+	{
+		id: "gpt-5.4",
+		name: "GPT-5.4",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 2.5, output: 15, cacheRead: 0.25 },
+	},
+	{
+		id: "gpt-5.4-mini",
+		name: "GPT-5.4 mini",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 0.75, output: 4.5, cacheRead: 0.075 },
+	},
+	{
+		id: "gpt-5.4-nano",
+		name: "GPT-5.4 nano",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 0.2, output: 1.25, cacheRead: 0.02 },
+	},
+	{
+		id: "gpt-5.2",
+		name: "GPT-5.2",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 1.75, output: 14, cacheRead: 0.175 },
+	},
+	{
+		id: "gpt-5.6-luna",
+		name: "GPT-5.6 Luna",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 0.2, output: 1.2, cacheRead: 0.02 },
+	},
+	{
+		id: "gpt-5.6-terra",
+		name: "GPT-5.6 Terra",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 2, output: 12, cacheRead: 0.2 },
+	},
+	{
+		id: "gpt-5.6-sol",
+		name: "GPT-5.6 Sol",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 4, output: 20, cacheRead: 0.4 },
+	},
+	{
+		id: "gpt-6-astra",
+		name: "GPT-6 Astra",
+		family: "gpt",
+		contextWindow: 400_000,
+		maxTokens: 128_000,
+		pricing: { input: 10, output: 50, cacheRead: 1 },
+	},
+];
+
+function buildGoodVisionModels(): Record<string, ModelInfo> {
+	return Object.fromEntries(
+		GOODVISION_MARKET_SNAPSHOT.map((entry) => [
+			entry.id,
+			{
+				id: entry.id,
+				name: entry.name,
+				contextWindow: entry.contextWindow,
+				maxInputTokens: entry.contextWindow,
+				maxTokens: entry.maxTokens,
+				capabilities: ["streaming", "tools", "images"],
+				...(entry.family ? { family: entry.family } : {}),
+				...(entry.pricing ? { pricing: entry.pricing } : {}),
+			} satisfies ModelInfo,
+		]),
+	);
+}
+
 type BuiltinSpecOverride = Pick<BuiltinSpec, "id"> &
 	Partial<Omit<BuiltinSpec, "id">>;
 
@@ -875,6 +1079,22 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		defaultModelId: "zai/GLM-5.2",
 		apiKeyEnv: ["CRUSOE_API_KEY"],
 		defaults: { baseUrl: "https://api.inference.crusoecloud.com/v1" },
+	},
+	{
+		id: "goodvision",
+		name: "GoodVision SmartRouter",
+		description:
+			"GoodVision's OpenAI-compatible SmartRouter gateway: `auto` lets the routing policy bound to the API key pick the model per request, or pin a model-market id",
+		family: "openai-compatible",
+		capabilities: ["tools"],
+		defaultModelId: GOODVISION_AUTO_MODEL_ID,
+		apiKeyEnv: ["GOODVISION_API_KEY"],
+		docsUrl: GOODVISION_CONSOLE_URL,
+		// The key's market, fetched with Bearer auth; the base URL the user
+		// configures (test vs production host) is substituted into it.
+		modelsSourceUrl: `${GOODVISION_TEST_BASE_URL}/models`,
+		defaults: { baseUrl: GOODVISION_TEST_BASE_URL },
+		modelsFactory: buildGoodVisionModels,
 	},
 	{
 		id: "litellm",

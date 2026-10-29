@@ -12,6 +12,7 @@ import { BannerCardData } from "./cline/banner"
 import { ClineRulesToggles } from "./cline-rules"
 import type { CloudTaskTargetView, CurrentCloudTaskInfo } from "./cloud/cloud-sessions"
 import { HistoryItem } from "./HistoryItem"
+import type { KnowledgeVaultTemplate, KnowledgeVaultWriteMode, KnowledgeVaultWriter } from "./knowledge-vault"
 import { McpDisplayMode } from "./McpDisplayMode"
 import { ClineMessageModelInfo } from "./messages"
 import { OnboardingModelGroup } from "./proto/cline/state"
@@ -122,6 +123,10 @@ export interface ExtensionState {
 	localAgentsRulesToggles: ClineRulesToggles
 	mcpResponsesCollapsed?: boolean
 	useAutoCondense?: boolean
+	knowledgeVaultEnabled?: boolean
+	knowledgeVaultTemplate?: KnowledgeVaultTemplate
+	knowledgeVaultWriter?: KnowledgeVaultWriter
+	knowledgeVaultWriteMode?: KnowledgeVaultWriteMode
 	compactionStrategy?: string
 	webSearchEnabled?: boolean
 	subagentsEnabled?: boolean

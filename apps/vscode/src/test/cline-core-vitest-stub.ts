@@ -145,6 +145,7 @@ export { PATCH_MARKERS, PatchActionType } from "../../../../sdk/packages/core/sr
 export { createEditorExecutor } from "../../../../sdk/packages/core/src/extensions/tools/executors/editor"
 export type { EditFileInput } from "../../../../sdk/packages/core/src/extensions/tools/schemas"
 export type { ApplyPatchExecutor, EditorExecutor, ToolExecutors } from "../../../../sdk/packages/core/src/extensions/tools/types"
+export { agentMessagesToMessages } from "../../../../sdk/packages/core/src/runtime/config/agent-message-codec"
 // Real rule selection re-exported from SDK source so standalone callers are
 // tested against the same pipeline a session's system prompt uses.
 export { loadRulesForSystemPromptFromRecords } from "../../../../sdk/packages/core/src/runtime/safety/rules"

@@ -1,4 +1,5 @@
 import { setCompactionStrategyGlobally, setModelToolEnabledGlobally } from "@cline/core"
+import { isKnowledgeVaultTemplate, isKnowledgeVaultWriteMode, isKnowledgeVaultWriter } from "@shared/knowledge-vault"
 import { Empty } from "@shared/proto/cline/common"
 import { PlanActMode, McpDisplayMode as ProtoMcpDisplayMode, UpdateSettingsRequest } from "@shared/proto/cline/state"
 import { convertProtoToApiProvider } from "@shared/proto-conversions/models/api-configuration-conversion"
@@ -176,6 +177,30 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 				)
 			}
 			controller.stateManager.setGlobalState("useAutoCondense", request.useAutoCondense)
+		}
+
+		// Knowledge Vault (cross-session repository memory). Read by the session hooks on
+		// every run, so a change applies to the next run without rebuilding the session.
+		if (request.knowledgeVaultEnabled !== undefined) {
+			controller.stateManager.setGlobalState("knowledgeVaultEnabled", !!request.knowledgeVaultEnabled)
+		}
+		if (request.knowledgeVaultTemplate !== undefined && request.knowledgeVaultTemplate !== "") {
+			if (!isKnowledgeVaultTemplate(request.knowledgeVaultTemplate)) {
+				throw new Error(`Invalid Knowledge Vault template: ${request.knowledgeVaultTemplate}`)
+			}
+			controller.stateManager.setGlobalState("knowledgeVaultTemplate", request.knowledgeVaultTemplate)
+		}
+		if (request.knowledgeVaultWriter !== undefined && request.knowledgeVaultWriter !== "") {
+			if (!isKnowledgeVaultWriter(request.knowledgeVaultWriter)) {
+				throw new Error(`Invalid Knowledge Vault writer: ${request.knowledgeVaultWriter}`)
+			}
+			controller.stateManager.setGlobalState("knowledgeVaultWriter", request.knowledgeVaultWriter)
+		}
+		if (request.knowledgeVaultWriteMode !== undefined && request.knowledgeVaultWriteMode !== "") {
+			if (!isKnowledgeVaultWriteMode(request.knowledgeVaultWriteMode)) {
+				throw new Error(`Invalid Knowledge Vault write mode: ${request.knowledgeVaultWriteMode}`)
+			}
+			controller.stateManager.setGlobalState("knowledgeVaultWriteMode", request.knowledgeVaultWriteMode)
 		}
 
 		// Update web search setting (stored in the SDK global settings file; applied when the next session is built)

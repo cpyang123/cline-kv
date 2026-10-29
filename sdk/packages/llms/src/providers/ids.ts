@@ -69,6 +69,8 @@ export enum BUILT_IN_PROVIDER {
 	SAPAICORE = "sapaicore",
 	// Aggregators
 	OPENROUTER = "openrouter",
+	// Smart routers (policy-driven model selection behind one OpenAI-compatible endpoint)
+	GOODVISION = "goodvision",
 }
 
 /**

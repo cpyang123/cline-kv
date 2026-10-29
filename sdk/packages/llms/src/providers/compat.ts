@@ -405,6 +405,11 @@ function buildGatewayRequest(
 		messages: toGatewayRequestMessages(messages),
 		tools: toGatewayTools(tools),
 		maxTokens: config.maxOutputTokens,
+		// A configured sampling temperature reaches the provider the same way the
+		// runtime's per-request option does; undefined keeps the model default.
+		...(config.temperature !== undefined
+			? { temperature: config.temperature }
+			: {}),
 		reasoning:
 			config.thinking !== undefined ||
 			config.reasoningEffort ||

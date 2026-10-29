@@ -1,0 +1,68 @@
+---
+title: "Knowledge Vault"
+description: "Cross-session repository memory: one structured note per completed task, injected into later tasks in the same workspace."
+---
+
+Knowledge Vault gives Cline memory across tasks. When a task completes, a writer model distills the session into one short structured note. The notes a workspace has accumulated are injected into the first turn of every later task in that workspace, so Cline starts from what earlier sessions established instead of rediscovering it.
+
+The method comes from the team's ChainSWE study, where it is the `mem_fusednote` arm: it resolved more chained tasks at lower cost than both no memory and a facts-extraction baseline, because the notes point the agent straight at the right files and verify commands.
+
+## Turning it on and off
+
+Settings → Features → **Knowledge Vault**. The switch applies to the next run of a task; no restart is needed. Three sub-settings sit under it:
+
+| Setting | Options | Meaning |
+| --- | --- | --- |
+| Note template | Two-block note (v5, default), Fused notes (v3) | The note format (see below). |
+| Write mode | Separate writer call (v5knote, default), In-session (v5inline) | How the note is produced (see below). |
+| Note writer | Task model (default), GoodVision SmartRouter | Which model writes the note. *Task model* is the task's own Act-mode provider and model. *GoodVision SmartRouter* uses the GoodVision provider configured under API Configuration, whatever the task ran on. |
+
+The defaults reproduce the `v5knote` arm of `knowledge-vault-project@chainswe-v5-note-arm` as documented in its `docs/V5_NOTE_ARM.md`. Choosing *Fused notes* reproduces the `fusednote` arm of the paper; *In-session* reproduces the later `v5inline` arm.
+
+## How a note is written
+
+**Separate writer call (v5knote).** The session transcript (the task, assistant turns, tool calls, tool results, later user messages, and the files the edit tools touched) is distilled by a fresh request: the template file is the whole system message, the transcript is the user message, middle-truncated at 18,000 characters, temperature 0 and at most 900 output tokens, exactly as the harness's `distill_fused_note`. The output must start with an allowed tag and contain no code fence; an invalid first attempt gets one corrective retry that names the violation, then the note is truncated at 1500 characters. These are the branch's documented defaults (`RSM_DISTILL_CAP`, `RSM_WRITER_MAXTOK`, `RSM_NOTE_CAP`, `RSM_VALID_V2` unset); the v2 line-boundary cut can be switched on in `note.ts`.
+
+**In-session (v5inline).** The actor is asked for the note as one more turn of its own conversation: the same system prompt, messages and tool definitions it saw during the task, plus the note instruction as the final user message, so the provider's prompt cache absorbs the prefix. A preflight checks that the estimated prompt plus the note's output budget fits the context window; the output is parsed leniently (thinking, fenced commands, THOUGHT lines and untagged lines are dropped) and retried once. When the turn is skipped, fails, or produces two invalid outputs, the separate writer call runs instead and the note's `reason` field records why (`no_headroom`, `invalid_twice`, `http_error`, …).
+
+Two differences from the harness are deliberate. The writer prompts are the branch's files with two bullets reworded for an editor session: "Every change of this session is already committed, so it can read the diff itself (git show HEAD)" becomes "with this session's changes already in it, so it can read the files and the git diff itself", and the fresh-shell bullet drops the `/tmp` and `pytest`/`python -c` specifics in favour of "a repository test or build command". And the harness's `mswea_bash_command` check has no equivalent, because Cline has no such tool name. Temperature 0 is not sent to OpenAI reasoning-era models, which reject it, nor through the GoodVision writer, mirroring the harness's strict mode for that gateway.
+
+## What a note looks like
+
+**Two-block notes** (the v5 template) scope a task block to the files it touched, then list repository-wide facts:
+
+```text
+FILES: src/net/fetch.ts, src/net/fetch.test.ts
+STATUS: completed | TESTS: bun test src/net/fetch.test.ts [last exit 0]
+VERIFY: bun test src/net/fetch.test.ts [exit 0] | COVERS: src/net/fetch.ts
+DID: retry loop with exponential backoff | WHERE: src/net/fetch.ts:12-40 (fetchWithRetry)
+CONTEXT: unit tests run with bun test | WHERE: package.json:14
+```
+
+**Fused notes** (the v3 template evaluated in the paper) are one line each. A DID line carries its own verification inline, repository facts are CONTEXT lines, and dead ends become LESSON lines:
+
+```text
+DID: added retry loop to fetchWithRetry | WHERE: src/net/fetch.ts:12-40 (fetchWithRetry) | VERIFY: bun test src/net/fetch.test.ts [last exit 0]
+CONTEXT: unit tests run with bun test; vitest config lives in vitest.config.ts | WHERE: package.json:14
+LESSON: mocking global fetch with vi.fn() breaks the undici agent; use msw instead
+```
+
+## Where the notes live
+
+Notes are stored per workspace in `.cline/knowledge-vault/notes.jsonl`, one JSON object per line (`ts`, `taskId`, `task`, `note`, `template`, `provider`, `model`, `mode`, `reason`). Delete the file to forget everything, or edit it to prune a note. A session that completes again (a follow-up turn) replaces its earlier note, so the vault holds one note per session. Add the directory to `.gitignore` if you do not want it committed; committing it shares the memory with teammates.
+
+At recall time the most recent 30,000 characters of notes are injected, wrapped as:
+
+```text
+<memory_context>
+Notes from earlier work sessions on this repository:
+[2026-10-29 Add a retry to the fetch helper]
+DID: ...
+</memory_context>
+```
+
+## What you see in the chat
+
+Two hook rows mark the vault's work: **KnowledgeVault (recall N notes)** at the start of a task, with the injected notes as its output, and **KnowledgeVault (write note (in-session))** or **(write note (separate: reason))** after the task completes, with the new note as its output. The write runs after the task is reported finished, so it never delays the task; if the writer fails, the row shows *Failed* with the reason and the vault is left unchanged.
+
+A note is written only when the run completed normally and the session used at least one tool. Aborted runs and plain question-and-answer sessions write nothing.

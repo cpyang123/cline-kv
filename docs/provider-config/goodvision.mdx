@@ -1,0 +1,25 @@
+---
+title: "GoodVision SmartRouter"
+description: "Run Cline through GoodVision's OpenAI-compatible SmartRouter gateway, with policy-driven model routing."
+---
+
+GoodVision's SmartRouter is an OpenAI-compatible gateway (`/v1/chat/completions`, `/v1/models`, Bearer auth). The routing policy bound to your API key decides which model serves a request when the model id is `auto`; any other id must match your account's model market verbatim.
+
+## Setup
+
+1. Create an API key in the GoodVision console (**SmartRouter settings → Create API key**). The secret is shown once. Keys are environment-specific: a key issued on the test console works only against the test host.
+2. In Cline, open Settings → API Configuration and choose **GoodVision SmartRouter**.
+3. Paste the key. The **Base URL** defaults to the test host, `https://api-test.goodvision.tech/v1`; set it to `https://api.goodvision.tech/v1` for production.
+4. Pick a model. The picker lists your key's live model market (fetched from `/v1/models` with your key). `auto` lets the routing policy choose per request; you can also type any market id.
+
+The provider also reads the `GOODVISION_API_KEY` environment variable when no key is saved.
+
+## Routing and cost
+
+- Routing is decided by the policy bound to the key in the console; the request itself cannot steer it. Each response carries the served model in its `model` field and in the `x-gv-selected-model` header.
+- The SmartRouter returns standard OpenAI `usage` (prompt and completion tokens) but no cost. Cline prices requests with a snapshot of list prices for the known market models; the router's usage page in the console is the authoritative bill. Requests on `auto` are not priced because the served model varies.
+
+## Current limitations
+
+- The router does not mask upstream failures: if a model family is unavailable upstream, requests to it fail rather than fall back. A policy that routes coding prompts to such a family makes `auto` fail for agent runs; pin a working model id instead.
+- Some routing policies admit no model offer for requests that declare tools and answer them with `422 no_candidate`. Cline's agent loop declares tools on every request, so such a key cannot drive tasks until GoodVision enables a tool-capable offer for the policy. Tool-free calls still work, which is why the [Knowledge Vault](/features/knowledge-vault) can use the SmartRouter as its note writer independently of the task's provider.

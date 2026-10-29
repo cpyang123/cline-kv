@@ -457,6 +457,40 @@ describe("built-in provider metadata", () => {
 		expect(defaultModel?.pricing).toBeDefined();
 	});
 
+	it("registers the GoodVision SmartRouter as an OpenAI-compatible gateway with a live model market", async () => {
+		await expect(getProvider("goodvision")).resolves.toMatchObject({
+			id: "goodvision",
+			name: "GoodVision SmartRouter",
+			baseUrl: "https://api-test.goodvision.tech/v1",
+			defaultModelId: "auto",
+			modelsSourceUrl: "https://api-test.goodvision.tech/v1/models",
+			env: ["GOODVISION_API_KEY"],
+		});
+
+		const models = await getModelsForProvider("goodvision");
+		// `auto` is the router mode; it carries the market's most restrictive
+		// limits because the policy may serve any market model.
+		expect(models.auto).toMatchObject({
+			contextWindow: 200_000,
+			maxTokens: 32_000,
+		});
+		expect(models.auto?.pricing).toBeUndefined();
+		// Snapshot of the market with list prices (USD per 1M tokens).
+		expect(models["claude-sonnet-5"]).toMatchObject({
+			contextWindow: 200_000,
+			pricing: { input: 2, output: 10, cacheRead: 0.2 },
+		});
+		expect(models["gpt-5.5"]).toMatchObject({
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		});
+		expect(models["gpt-5.4-mini"]?.capabilities).toEqual([
+			"streaming",
+			"tools",
+			"images",
+		]);
+	});
+
 	it("derives ChatGPT subscription models from the generated OpenAI catalog", async () => {
 		const chatGptModels = await getModelsForProvider("openai-codex");
 		const openAiModels = await getModelsForProvider("openai-native");

@@ -1,3 +1,12 @@
+import {
+	KNOWLEDGE_VAULT_RELATIVE_PATH,
+	KNOWLEDGE_VAULT_TEMPLATE_LABELS,
+	KNOWLEDGE_VAULT_TEMPLATES,
+	KNOWLEDGE_VAULT_WRITE_MODE_LABELS,
+	KNOWLEDGE_VAULT_WRITE_MODES,
+	KNOWLEDGE_VAULT_WRITER_LABELS,
+	KNOWLEDGE_VAULT_WRITERS,
+} from "@shared/knowledge-vault"
 import { UpdateSettingsRequest } from "@shared/proto/cline/state"
 import { memo, type ReactNode } from "react"
 import { Label } from "@/components/ui/label"
@@ -156,7 +165,12 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 		showFeatureTips,
 		cloudSessionsAvailable,
 		cloudSessionsEnabled,
+		knowledgeVaultEnabled,
+		knowledgeVaultTemplate,
+		knowledgeVaultWriter,
+		knowledgeVaultWriteMode,
 	} = useExtensionState()
+	const vaultOn = knowledgeVaultEnabled ?? true
 
 	// State lookup for mapped features
 	const featureState: Record<string, boolean | undefined> = {
@@ -226,6 +240,95 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 								label="Cloud"
 								onChange={(checked) => updateSetting("cloudSessionsEnabled", checked)}
 							/>
+						</div>
+					</div>
+
+					{/* Knowledge Vault */}
+					<div>
+						<div className="text-xs font-medium text-foreground/80 uppercase tracking-wider mb-3">
+							Knowledge Vault
+						</div>
+						<div
+							className="relative p-3 pt-0 my-3 rounded-md border border-editor-widget-border/50"
+							id="knowledge-vault-features">
+							<FeatureRow
+								checked={vaultOn}
+								description={
+									<>
+										Cross-session repository memory. After each completed task a writer model distills the
+										session into one short structured note (what was done and where, how it was verified,
+										repository facts, dead ends). The workspace's notes are injected into the first turn of
+										later tasks, so Cline inherits what earlier sessions established. Notes live in{" "}
+										<code>{KNOWLEDGE_VAULT_RELATIVE_PATH}</code> inside the workspace.
+									</>
+								}
+								id="knowledge-vault"
+								label="Knowledge Vault"
+								onChange={(checked) => updateSetting("knowledgeVaultEnabled", checked)}
+							/>
+							<div className="space-y-2 py-3">
+								<Label className="text-sm font-medium text-foreground">Note template</Label>
+								<p className="text-xs text-muted-foreground">
+									{KNOWLEDGE_VAULT_TEMPLATE_LABELS[knowledgeVaultTemplate ?? "two-block"]?.description}
+								</p>
+								<Select
+									disabled={!vaultOn}
+									onValueChange={(value) => updateSetting("knowledgeVaultTemplate", value)}
+									value={knowledgeVaultTemplate ?? "two-block"}>
+									<SelectTrigger className="w-full" id="knowledge-vault-template">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{KNOWLEDGE_VAULT_TEMPLATES.map((template) => (
+											<SelectItem key={template} value={template}>
+												{KNOWLEDGE_VAULT_TEMPLATE_LABELS[template].label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-2 py-3">
+								<Label className="text-sm font-medium text-foreground">Write mode</Label>
+								<p className="text-xs text-muted-foreground">
+									{KNOWLEDGE_VAULT_WRITE_MODE_LABELS[knowledgeVaultWriteMode ?? "separate"]?.description}
+								</p>
+								<Select
+									disabled={!vaultOn}
+									onValueChange={(value) => updateSetting("knowledgeVaultWriteMode", value)}
+									value={knowledgeVaultWriteMode ?? "separate"}>
+									<SelectTrigger className="w-full" id="knowledge-vault-write-mode">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{KNOWLEDGE_VAULT_WRITE_MODES.map((writeMode) => (
+											<SelectItem key={writeMode} value={writeMode}>
+												{KNOWLEDGE_VAULT_WRITE_MODE_LABELS[writeMode].label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-2 py-3">
+								<Label className="text-sm font-medium text-foreground">Note writer</Label>
+								<p className="text-xs text-muted-foreground">
+									{KNOWLEDGE_VAULT_WRITER_LABELS[knowledgeVaultWriter ?? "task"]?.description}
+								</p>
+								<Select
+									disabled={!vaultOn}
+									onValueChange={(value) => updateSetting("knowledgeVaultWriter", value)}
+									value={knowledgeVaultWriter ?? "task"}>
+									<SelectTrigger className="w-full" id="knowledge-vault-writer">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{KNOWLEDGE_VAULT_WRITERS.map((writer) => (
+											<SelectItem key={writer} value={writer}>
+												{KNOWLEDGE_VAULT_WRITER_LABELS[writer].label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
 						</div>
 					</div>
 

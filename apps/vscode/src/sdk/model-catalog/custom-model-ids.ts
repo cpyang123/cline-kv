@@ -6,7 +6,9 @@ import { toSdkProviderId } from "./sdk-provider-id"
 // list that the user can also bypass (ollama/lmstudio/litellm/vertex). For these,
 // the picker must allow arbitrary model ids and model resolution must honor
 // the requested id instead of coercing to the catalog default.
-const CUSTOM_MODEL_ID_PROVIDER_IDS = new Set(["openai-compatible", "ollama", "lmstudio", "litellm", "vertex"])
+// goodvision: the SmartRouter's model market is per account and fetched live;
+// an id the snapshot does not know must still be accepted verbatim.
+const CUSTOM_MODEL_ID_PROVIDER_IDS = new Set(["openai-compatible", "ollama", "lmstudio", "litellm", "vertex", "goodvision"])
 
 /**
  * Whether a provider id accepts a user-supplied (custom) model id.

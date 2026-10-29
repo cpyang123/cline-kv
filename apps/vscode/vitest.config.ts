@@ -8,6 +8,7 @@ export default defineConfig({
 	test: {
 		include: [
 			"src/sdk/**/*.test.ts",
+			"src/core/knowledge-vault/**/*.test.ts",
 			"src/hosts/vscode/VscodeEditPreview.test.ts",
 			"src/shared/vsCodeSelectorUtils.test.ts",
 			"src/shared/net.test.ts",

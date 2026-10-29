@@ -38,7 +38,7 @@ describe("SdkSessionConfigBuilder", () => {
 		expect(actConfig.extraTools?.some((tool) => tool.name === "switch_to_act_mode")).toBe(false)
 	})
 
-	it("wires the agent hooks into the SDK config", async () => {
+	it("wires the agent hooks into the SDK config alongside the Knowledge Vault hooks", async () => {
 		const hooks = { beforeModel: vi.fn() }
 		mocks.buildAgentHooks.mockReturnValueOnce(hooks)
 		mocks.buildSessionConfig.mockResolvedValueOnce({ hooks: {} })
@@ -49,7 +49,14 @@ describe("SdkSessionConfigBuilder", () => {
 		})
 
 		const config = await builder.build({ cwd: "/workspace", mode: "act" })
-		expect(config.hooks).toBe(hooks)
+		// Both bags define beforeModel (the Knowledge Vault captures the actor's
+		// request there), so the composed callback must still reach the file hooks…
+		expect(config.hooks?.beforeModel).not.toBe(hooks.beforeModel)
+		await config.hooks?.beforeModel?.({ snapshot: { messages: [] }, request: { messages: [], tools: [] } } as never)
+		expect(hooks.beforeModel).toHaveBeenCalledTimes(1)
+		// …and the Knowledge Vault contributes its recall (beforeRun) and write (afterRun) hooks.
+		expect(typeof config.hooks?.beforeRun).toBe("function")
+		expect(typeof config.hooks?.afterRun).toBe("function")
 	})
 
 	it("passes the mistake-limit callback into the SDK config without overriding SDK execution defaults", async () => {

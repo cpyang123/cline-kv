@@ -213,6 +213,16 @@ describe("providerSettingsRegistry", () => {
 			providerName: "ai&",
 			signupUrl: "https://console.aiand.com/",
 		})
+		expect(getFallbackGenericProviderSettings("goodvision")).toEqual({
+			allowsCustomIds: true,
+			providerId: "goodvision",
+			providerName: "GoodVision SmartRouter",
+			signupUrl: "https://console-test.goodvision.tech/console/router-settings",
+			baseUrlField: {
+				label: "Base URL",
+				placeholder: "https://api-test.goodvision.tech/v1 (production: https://api.goodvision.tech/v1)",
+			},
+		})
 		expect(getFallbackGenericProviderSettings("openai")).toBeUndefined()
 	})
 })

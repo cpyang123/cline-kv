@@ -305,6 +305,10 @@ export const ExtensionStateContextProvider: React.FC<{
 		onboardingModels: undefined,
 		mcpResponsesCollapsed: false, // Default value (expanded), will be overwritten by extension state
 		useAutoCondense: true,
+		knowledgeVaultEnabled: true,
+		knowledgeVaultTemplate: "two-block",
+		knowledgeVaultWriter: "task",
+		knowledgeVaultWriteMode: "separate",
 		compactionStrategy: "basic",
 		webSearchEnabled: false,
 		subagentsEnabled: false,
