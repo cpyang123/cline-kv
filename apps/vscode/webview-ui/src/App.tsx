@@ -3,6 +3,7 @@ import { useCallback, useEffect } from "react"
 import AccountView from "./components/account/AccountView"
 import ChatView from "./components/chat/ChatView"
 import HistoryView from "./components/history/HistoryView"
+import KnowledgeVaultView from "./components/knowledge-vault/KnowledgeVaultView"
 import MarketplaceView from "./components/marketplace/MarketplaceView"
 import McpView from "./components/mcp/configuration/McpConfigurationView"
 import { openClinePassSubscriptionIfPending } from "./components/onboarding/clinePassSubscribe"
@@ -27,6 +28,7 @@ const AppContent = () => {
 		showHistory,
 		showAccount,
 		showWorktrees,
+		showKnowledgeVault,
 		showAnnouncement,
 		setShowAnnouncement,
 		setShouldShowAnnouncement,
@@ -36,6 +38,7 @@ const AppContent = () => {
 		hideHistory,
 		hideAccount,
 		hideWorktrees,
+		hideKnowledgeVault,
 		closeMarketplaceView,
 		hideAnnouncement,
 	} = useExtensionState()
@@ -100,10 +103,19 @@ const AppContent = () => {
 				/>
 			)}
 			{showWorktrees && <WorktreesView onDone={hideWorktrees} />}
+			{showKnowledgeVault && <KnowledgeVaultView onDone={hideKnowledgeVault} />}
 			{/* Do not conditionally load ChatView, it's expensive and there's state we don't want to lose (user input, disableInput, askResponse promise, etc.) */}
 			<ChatView
 				hideAnnouncement={hideAnnouncement}
-				isHidden={showSettings || showHistory || showMarketplace || showMcp || showAccount || showWorktrees}
+				isHidden={
+					showSettings ||
+					showHistory ||
+					showMarketplace ||
+					showMcp ||
+					showAccount ||
+					showWorktrees ||
+					showKnowledgeVault
+				}
 				showAnnouncement={showAnnouncement}
 				showHistoryView={navigateToHistory}
 			/>

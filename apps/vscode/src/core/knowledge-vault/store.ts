@@ -119,6 +119,32 @@ export class KnowledgeVaultStore {
 		await this.writeAll([])
 	}
 
+	/** Removes one note by id; a missing id is a no-op. */
+	async delete(id: string): Promise<KnowledgeVaultNote[]> {
+		const existing = await this.list()
+		const next = existing.filter((entry) => entry.id !== id)
+		if (next.length !== existing.length) {
+			await this.writeAll(next)
+		}
+		return next
+	}
+
+	async exists(): Promise<boolean> {
+		try {
+			await fs.access(this.filePath)
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	/** Creates an empty vault file when none exists, so it can be opened in the editor. */
+	async ensureFile(): Promise<void> {
+		if (!(await this.exists())) {
+			await this.writeAll([])
+		}
+	}
+
 	private async writeAll(notes: readonly KnowledgeVaultNote[]): Promise<void> {
 		await fs.mkdir(path.dirname(this.filePath), { recursive: true })
 		const tmp = `${this.filePath}.${process.pid}.${Date.now()}.tmp`

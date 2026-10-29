@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package cline;
+
+import "cline/common.proto";
+
+option go_package = "github.com/cline/grpc-go/cline";
+option java_multiple_files = true;
+option java_package = "bot.cline.proto";
+
+// Knowledge Vault: the workspace's cross-session memory notes
+service KnowledgeVaultService {
+  // Reads the current workspace's vault
+  rpc getKnowledgeVault(EmptyRequest) returns (KnowledgeVaultSnapshot);
+
+  // Deletes one note by id and returns the updated vault
+  rpc deleteKnowledgeVaultNote(StringRequest) returns (KnowledgeVaultSnapshot);
+
+  // Removes every note and returns the emptied vault
+  rpc clearKnowledgeVault(EmptyRequest) returns (KnowledgeVaultSnapshot);
+
+  // Opens the vault's notes file in the editor
+  rpc openKnowledgeVaultFile(EmptyRequest) returns (Empty);
+}
+
+message KnowledgeVaultSnapshot {
+  string workspace_root = 1;
+  string file_path = 2;
+  bool exists = 3;
+  repeated KnowledgeVaultNote notes = 4;
+  int32 total_chars = 5;
+  // Characters the next task would receive (the most recent notes, FIFO-capped)
+  int32 injected_chars = 6;
+  bool enabled = 7;
+}
+
+message KnowledgeVaultNote {
+  string id = 1;
+  int64 ts = 2;
+  string task_id = 3;
+  string task = 4;
+  string note = 5;
+  string template = 6;
+  optional string provider = 7;
+  optional string model = 8;
+  optional string mode = 9;
+  optional string reason = 10;
+  string label = 11;
+}

@@ -78,6 +78,7 @@ enum ClineSay {
   COMPACTION = 37;
   PLAN_COMPLETION_RESULT = 38;
   CLOUD_PROVISIONING = 39;
+  KNOWLEDGE_VAULT = 40;
 }
 
 // Enum for ClineSayTool tool types
@@ -286,12 +287,14 @@ service UiService {
   // Subscribe to worktrees button clicked events
   rpc subscribeToWorktreesButtonClicked(EmptyRequest) returns (stream Empty);
 
+  // Subscribe to knowledge vault (memory) button clicked events
+  rpc subscribeToKnowledgeVaultButtonClicked(EmptyRequest) returns (stream Empty);
+
   // Subscribe to partial message updates (streaming Cline messages as they're built)
   rpc subscribeToPartialMessage(EmptyRequest) returns (stream ClineMessage);
 
   // Initialize webview when it launches
   rpc initializeWebview(EmptyRequest) returns (Empty);
-
 
   // Subscribe to show webview events
   rpc subscribeToShowWebview(EmptyRequest) returns (stream ShowWebviewEvent);

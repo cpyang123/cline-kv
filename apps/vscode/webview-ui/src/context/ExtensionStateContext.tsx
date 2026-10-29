@@ -80,6 +80,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	showHistory: boolean
 	showAccount: boolean
 	showWorktrees: boolean
+	showKnowledgeVault: boolean
 	showAnnouncement: boolean
 	expandTaskHeader: boolean
 
@@ -132,6 +133,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	navigateToHistory: () => void
 	navigateToAccount: () => void
 	navigateToWorktrees: () => void
+	navigateToKnowledgeVault: () => void
 	navigateToChat: () => void
 
 	// Hide functions
@@ -139,6 +141,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	hideHistory: () => void
 	hideAccount: () => void
 	hideWorktrees: () => void
+	hideKnowledgeVault: () => void
 	hideAnnouncement: () => void
 	closeMarketplaceView: () => void
 	closeMcpView: () => void
@@ -161,6 +164,7 @@ export const ExtensionStateContextProvider: React.FC<{
 	const [showHistory, setShowHistory] = useState(false)
 	const [showAccount, setShowAccount] = useState(false)
 	const [showWorktrees, setShowWorktrees] = useState(false)
+	const [showKnowledgeVault, setShowKnowledgeVault] = useState(false)
 	const [showAnnouncement, setShowAnnouncement] = useState(false)
 
 	// Helper for MCP view
@@ -181,6 +185,7 @@ export const ExtensionStateContextProvider: React.FC<{
 	const hideHistory = useCallback(() => setShowHistory(false), [setShowHistory])
 	const hideAccount = useCallback(() => setShowAccount(false), [setShowAccount])
 	const hideWorktrees = useCallback(() => setShowWorktrees(false), [setShowWorktrees])
+	const hideKnowledgeVault = useCallback(() => setShowKnowledgeVault(false), [setShowKnowledgeVault])
 	const hideAnnouncement = useCallback(() => setShowAnnouncement(false), [setShowAnnouncement])
 
 	// Navigation functions
@@ -270,7 +275,25 @@ export const ExtensionStateContextProvider: React.FC<{
 		setShowHistory(false)
 		setShowAccount(false)
 		setShowWorktrees(false)
+		setShowKnowledgeVault(false)
 	}, [closeMarketplaceView, setShowSettings, closeMcpView, setShowHistory, setShowAccount, setShowWorktrees])
+
+	// The Memory (Knowledge Vault) view: opened from the navbar or the title-bar
+	// button; any other view taking over hides it, so the views never stack.
+	const navigateToKnowledgeVault = useCallback(() => {
+		closeMarketplaceView()
+		setShowSettings(false)
+		closeMcpView()
+		setShowHistory(false)
+		setShowAccount(false)
+		setShowWorktrees(false)
+		setShowKnowledgeVault(true)
+	}, [closeMarketplaceView, setShowSettings, closeMcpView, setShowHistory, setShowAccount, setShowWorktrees])
+	useEffect(() => {
+		if (showSettings || showHistory || showMcp || showMarketplace || showAccount || showWorktrees) {
+			setShowKnowledgeVault(false)
+		}
+	}, [showSettings, showHistory, showMcp, showMarketplace, showAccount, showWorktrees])
 
 	const [state, setState] = useState<ExtensionState>({
 		version: "",
@@ -432,6 +455,7 @@ export const ExtensionStateContextProvider: React.FC<{
 	const accountButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
 	const settingsButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
 	const worktreesButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
+	const knowledgeVaultButtonClickedSubscriptionRef = useRef<(() => void) | null>(null)
 	const partialMessageUnsubscribeRef = useRef<(() => void) | null>(null)
 	const openRouterModelsUnsubscribeRef = useRef<(() => void) | null>(null)
 	const liteLlmModelsUnsubscribeRef = useRef<(() => void) | null>(null)
@@ -620,6 +644,20 @@ export const ExtensionStateContextProvider: React.FC<{
 			},
 		)
 
+		// Memory (Knowledge Vault) title-bar button
+		knowledgeVaultButtonClickedSubscriptionRef.current = UiServiceClient.subscribeToKnowledgeVaultButtonClicked(
+			EmptyRequest.create({}),
+			{
+				onResponse: () => {
+					navigateToKnowledgeVault()
+				},
+				onError: (error: any) => {
+					console.error("Error in knowledge vault button clicked subscription:", error)
+				},
+				onComplete: () => {},
+			},
+		)
+
 		// Subscribe to partial message events
 		partialMessageUnsubscribeRef.current = UiServiceClient.subscribeToPartialMessage(EmptyRequest.create({}), {
 			onResponse: (protoMessage: any) => {
@@ -754,6 +792,10 @@ export const ExtensionStateContextProvider: React.FC<{
 				worktreesButtonClickedSubscriptionRef.current()
 				worktreesButtonClickedSubscriptionRef.current = null
 			}
+			if (knowledgeVaultButtonClickedSubscriptionRef.current) {
+				knowledgeVaultButtonClickedSubscriptionRef.current()
+				knowledgeVaultButtonClickedSubscriptionRef.current = null
+			}
 			if (partialMessageUnsubscribeRef.current) {
 				partialMessageUnsubscribeRef.current()
 				partialMessageUnsubscribeRef.current = null
@@ -881,6 +923,7 @@ export const ExtensionStateContextProvider: React.FC<{
 		showHistory,
 		showAccount,
 		showWorktrees,
+		showKnowledgeVault,
 		showAnnouncement,
 		globalClineRulesToggles: state.globalClineRulesToggles || {},
 		localClineRulesToggles: state.localClineRulesToggles || {},
@@ -901,6 +944,7 @@ export const ExtensionStateContextProvider: React.FC<{
 		navigateToHistory,
 		navigateToAccount,
 		navigateToWorktrees,
+		navigateToKnowledgeVault,
 		navigateToChat,
 
 		// Hide functions
@@ -908,6 +952,7 @@ export const ExtensionStateContextProvider: React.FC<{
 		hideHistory,
 		hideAccount,
 		hideWorktrees,
+		hideKnowledgeVault,
 		hideAnnouncement,
 		closeMarketplaceView,
 		setShowAnnouncement,

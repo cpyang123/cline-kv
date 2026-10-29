@@ -1,8 +1,7 @@
 export { composeAgentHooks } from "./compose"
 export {
 	buildKnowledgeVaultHooks,
-	buildKnowledgeVaultStatusMessage,
-	KNOWLEDGE_VAULT_HOOK_NAME,
+	buildKnowledgeVaultMessage,
 	type KnowledgeVaultHooks,
 	type KnowledgeVaultHooksOptions,
 } from "./hooks"
@@ -13,6 +12,7 @@ export {
 	type KnowledgeVaultNote,
 	KnowledgeVaultStore,
 	MEM_WRAP_HEAD,
+	noteLabel,
 	renderVaultBody,
 	resolveKnowledgeVaultPath,
 	STORE_FIFO_CHARS,

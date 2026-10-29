@@ -63,6 +63,13 @@ DID: ...
 
 ## What you see in the chat
 
-Two hook rows mark the vault's work: **KnowledgeVault (recall N notes)** at the start of a task, with the injected notes as its output, and **KnowledgeVault (write note (in-session))** or **(write note (separate: reason))** after the task completes, with the new note as its output. The write runs after the task is reported finished, so it never delays the task; if the writer fails, the row shows *Failed* with the reason and the vault is left unchanged.
+Memory activity shows as small one-line markers with a brain icon, so it stays out of the way during normal use: **Memory recalled · N notes** at the start of a task, and **Writing memory note** followed by **Memory note written · in-session** (or **· separate · reason**) when the task completes. Click a marker to expand it: the recall marker shows the exact notes that were injected, the write marker shows the new note and the writer model, and both link to the Memory view. A failed write shows **Memory note not written · reason** and leaves the vault unchanged.
 
 A note is written only when the run completed normally and the session used at least one tool. Aborted runs and plain question-and-answer sessions write nothing.
+
+## The Memory view
+
+The brain icon in Cline's navbar (and the **Memory (Knowledge Vault)** button in the sidebar's title bar) opens the Memory view:
+
+- **This task**: every recall and write of the task currently shown in the chat, each expandable to its full text.
+- **Workspace vault**: all notes of the current workspace, newest first, with their template, write mode and writer model. Each note expands to its text and can be deleted; **Clear all** empties the vault after a confirmation; **Open notes file** opens `.cline/knowledge-vault/notes.jsonl`, the whole memory document, in the editor. The header shows how many characters the next task will receive under the 30,000-character cap.

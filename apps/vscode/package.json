@@ -148,6 +148,11 @@
 				"icon": "$(history)"
 			},
 			{
+				"command": "cline.knowledgeVaultButtonClicked",
+				"title": "Memory (Knowledge Vault)",
+				"icon": "$(book)"
+			},
+			{
 				"command": "cline.accountButtonClicked",
 				"title": "Account",
 				"icon": "$(account)"
@@ -267,6 +272,11 @@
 				{
 					"command": "cline.historyButtonClicked",
 					"group": "navigation@3",
+					"when": "view == claude-dev.SidebarProvider"
+				},
+				{
+					"command": "cline.knowledgeVaultButtonClicked",
+					"group": "navigation@4",
 					"when": "view == claude-dev.SidebarProvider"
 				},
 				{

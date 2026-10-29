@@ -287,6 +287,24 @@ export type ClineSay =
 	| "conditional_rules_applied"
 	| "compaction" // context compaction progress/result divider
 	| "cloud_provisioning" // cloud sandbox start/resume progress
+	| "knowledge_vault" // Knowledge Vault memory recalled into / written from this task
+
+/** Payload of a `knowledge_vault` say message (JSON in `text`). */
+export interface ClineKnowledgeVaultInfo {
+	/** `recall`: notes injected at the start of the task; `write`: the note written when the task completed. */
+	kind: "recall" | "write"
+	status: "running" | "completed" | "failed"
+	/** recall: number of notes injected */
+	count?: number
+	/** write: `inline` (the actor wrote it in-session) or `separate` (a writer call) */
+	mode?: "inline" | "separate"
+	/** write: why the separate writer was used, or the failure */
+	reason?: string
+	/** The injected notes (recall) or the note text / error (write) */
+	body?: string
+	provider?: string
+	model?: string
+}
 
 export interface ClineSayTool {
 	tool:

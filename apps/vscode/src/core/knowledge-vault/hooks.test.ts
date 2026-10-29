@@ -2,10 +2,10 @@ import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
 import type { AgentMessage, Message } from "@cline/shared"
-import type { ClineMessage } from "@shared/ExtensionMessage"
+import type { ClineKnowledgeVaultInfo, ClineMessage } from "@shared/ExtensionMessage"
 import type { KnowledgeVaultTemplate, KnowledgeVaultWriteMode, KnowledgeVaultWriter } from "@shared/knowledge-vault"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { buildKnowledgeVaultHooks, KNOWLEDGE_VAULT_HOOK_NAME } from "./hooks"
+import { buildKnowledgeVaultHooks } from "./hooks"
 import { FUSED_WRITER_PROMPT, INLINE_NOTE_INSTRUCTION, TWO_BLOCK_WRITER_PROMPT } from "./prompts"
 import { KnowledgeVaultStore, MEM_WRAP_HEAD } from "./store"
 import type { NoteWriterHandler, WriterStreamChunk } from "./writer"
@@ -106,8 +106,9 @@ describe("Knowledge Vault hooks", () => {
 		})
 	}
 
-	function statusOf(m: ClineMessage) {
-		return JSON.parse(m.text?.split("\n__HOOK_OUTPUT__\n")[0] ?? "") as { hookName: string; toolName: string; status: string }
+	function infoOf(m: ClineMessage): ClineKnowledgeVaultInfo {
+		expect(m.say).toBe("knowledge_vault")
+		return JSON.parse(m.text ?? "") as ClineKnowledgeVaultInfo
 	}
 
 	async function completeRun(vault: ReturnType<typeof build>, messages = fullSession, captureRequest = true) {
@@ -155,10 +156,11 @@ describe("Knowledge Vault hooks", () => {
 			`${MEM_WRAP_HEAD}[2026-10-01 Old task]\nDID: old | WHERE: a:1 | VERIFY: none\n</memory_context>`,
 		)
 		expect(emitted).toHaveLength(1)
-		expect(statusOf(emitted[0])).toEqual({
-			hookName: KNOWLEDGE_VAULT_HOOK_NAME,
-			toolName: "recall 1 note",
+		expect(infoOf(emitted[0])).toEqual({
+			kind: "recall",
 			status: "completed",
+			count: 1,
+			body: "[2026-10-01 Old task]\nDID: old | WHERE: a:1 | VERIFY: none",
 		})
 	})
 
@@ -227,10 +229,14 @@ describe("Knowledge Vault hooks", () => {
 			note: TWO_BLOCK_NOTE,
 		})
 		expect(written).toEqual([{ note: notes[0] }])
-		expect(emitted.map((m) => [statusOf(m).status, statusOf(m).toolName])).toEqual([
-			["running", "write note"],
-			["completed", "write note (in-session)"],
-		])
+		expect(emitted.map((m) => infoOf(m).status)).toEqual(["running", "completed"])
+		expect(infoOf(emitted[1])).toMatchObject({
+			kind: "write",
+			mode: "inline",
+			reason: "ok",
+			body: TWO_BLOCK_NOTE,
+			model: "gpt-5.4-mini",
+		})
 		expect(emitted[0].ts).toBe(emitted[1].ts)
 	})
 
@@ -244,7 +250,12 @@ describe("Knowledge Vault hooks", () => {
 		expect(model.calls[2].tools).toBeUndefined()
 		expect(model.calls[2].messages[0].content).toContain("TASK:\nAdd a retry to the fetch helper")
 		expect((await store.list())[0]).toMatchObject({ mode: "separate", reason: "invalid_twice", note: TWO_BLOCK_NOTE })
-		expect(statusOf(emitted.at(-1)!).toolName).toBe("write note (separate: invalid_twice)")
+		expect(infoOf(emitted.at(-1)!)).toMatchObject({
+			kind: "write",
+			status: "completed",
+			mode: "separate",
+			reason: "invalid_twice",
+		})
 	})
 
 	it("skips the in-session turn when the actor's context window has no room", async () => {
@@ -312,7 +323,7 @@ describe("Knowledge Vault hooks", () => {
 
 		expect(await store.list()).toEqual([])
 		expect(written).toEqual([{ error: "the writer's output did not validate after one retry" }])
-		expect(statusOf(emitted.at(-1)!).status).toBe("failed")
+		expect(infoOf(emitted.at(-1)!)).toMatchObject({ kind: "write", status: "failed" })
 	})
 
 	it("survives a writer that throws", async () => {

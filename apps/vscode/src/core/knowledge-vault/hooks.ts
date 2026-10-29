@@ -8,7 +8,7 @@ import type {
 	AgentRunStartResult,
 	AgentToolDefinition,
 } from "@cline/shared"
-import type { ClineMessage } from "@shared/ExtensionMessage"
+import type { ClineKnowledgeVaultInfo, ClineMessage } from "@shared/ExtensionMessage"
 import type { KnowledgeVaultTemplate, KnowledgeVaultWriteMode, KnowledgeVaultWriter } from "@shared/knowledge-vault"
 import { Logger } from "@shared/services/Logger"
 import { lastActorPromptTokens, runInlineNoteTurn } from "./inline"
@@ -16,11 +16,6 @@ import { buildSessionMaterial, firstUserPrompt, hasAssistantMessage, hasToolCall
 import { NOTE_TEMPLATES } from "./note"
 import { type KnowledgeVaultNote, type KnowledgeVaultStore, renderVaultBody, wrapMemoryContext } from "./store"
 import { distillNote, type NoteWriterHandler } from "./writer"
-
-/** Hook name shown in the chat's hook rows. */
-export const KNOWLEDGE_VAULT_HOOK_NAME = "KnowledgeVault"
-/** Separator the chat's hook row uses between the status JSON and its output. */
-const HOOK_OUTPUT_SEPARATOR = "__HOOK_OUTPUT__"
 
 export type KnowledgeVaultStatus = "running" | "completed" | "failed"
 
@@ -50,22 +45,17 @@ interface CapturedRequest {
 	tools: readonly AgentToolDefinition[]
 }
 
-export function buildKnowledgeVaultStatusMessage(options: {
-	status: KnowledgeVaultStatus
-	action: string
-	ts: number
-	output?: string
-}): ClineMessage {
-	const metadata = JSON.stringify({
-		hookName: KNOWLEDGE_VAULT_HOOK_NAME,
-		toolName: options.action,
-		status: options.status,
-	})
+/**
+ * A `knowledge_vault` chat message: a compact marker the chat renders as a
+ * small icon row, expandable to the injected notes or the written note. The
+ * same `ts` is reused to turn a running marker into its final state in place.
+ */
+export function buildKnowledgeVaultMessage(info: ClineKnowledgeVaultInfo, ts: number): ClineMessage {
 	return {
-		ts: options.ts,
+		ts,
 		type: "say",
-		say: "hook_status",
-		text: options.output ? `${metadata}\n${HOOK_OUTPUT_SEPARATOR}\n${options.output}` : metadata,
+		say: "knowledge_vault",
+		text: JSON.stringify(info),
 		partial: false,
 	}
 }
@@ -120,12 +110,7 @@ export function buildKnowledgeVaultHooks(options: KnowledgeVaultHooksOptions): K
 			}
 			const body = renderVaultBody(notes)
 			options.emitHookMessage?.(
-				buildKnowledgeVaultStatusMessage({
-					status: "completed",
-					action: `recall ${notes.length} note${notes.length === 1 ? "" : "s"}`,
-					ts: now(),
-					output: body,
-				}),
+				buildKnowledgeVaultMessage({ kind: "recall", status: "completed", count: notes.length, body }, now()),
 			)
 			return { appendContext: wrapMemoryContext(body) }
 		} catch (error) {
@@ -141,7 +126,7 @@ export function buildKnowledgeVaultHooks(options: KnowledgeVaultHooksOptions): K
 
 	const writeNote = async (taskId: string, messages: readonly AgentMessage[]): Promise<void> => {
 		const ts = now()
-		options.emitHookMessage?.(buildKnowledgeVaultStatusMessage({ status: "running", action: "write note", ts }))
+		options.emitHookMessage?.(buildKnowledgeVaultMessage({ kind: "write", status: "running" }, ts))
 		try {
 			const template = NOTE_TEMPLATES[options.getTemplate()] ?? NOTE_TEMPLATES["two-block"]
 			const writer = options.getWriter()
@@ -186,7 +171,17 @@ export function buildKnowledgeVaultHooks(options: KnowledgeVaultHooksOptions): K
 				if (!result.note) {
 					const detail = result.error ?? "the writer produced no valid note"
 					options.emitHookMessage?.(
-						buildKnowledgeVaultStatusMessage({ status: "failed", action: "write note", ts, output: detail }),
+						buildKnowledgeVaultMessage(
+							{
+								kind: "write",
+								status: "failed",
+								reason,
+								body: detail,
+								provider: model.providerId,
+								model: model.id,
+							},
+							ts,
+						),
 					)
 					options.onNoteWritten?.({ error: detail })
 					return
@@ -209,19 +204,15 @@ export function buildKnowledgeVaultHooks(options: KnowledgeVaultHooksOptions): K
 			}
 			await options.store.upsert(record)
 			options.emitHookMessage?.(
-				buildKnowledgeVaultStatusMessage({
-					status: "completed",
-					action: mode === "inline" ? "write note (in-session)" : `write note (separate: ${reason})`,
+				buildKnowledgeVaultMessage(
+					{ kind: "write", status: "completed", mode, reason, body: note, provider: model.providerId, model: model.id },
 					ts,
-					output: note,
-				}),
+				),
 			)
 			options.onNoteWritten?.({ note: record })
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
-			options.emitHookMessage?.(
-				buildKnowledgeVaultStatusMessage({ status: "failed", action: "write note", ts, output: message }),
-			)
+			options.emitHookMessage?.(buildKnowledgeVaultMessage({ kind: "write", status: "failed", body: message }, ts))
 			options.onNoteWritten?.({ error: message })
 			Logger.error("[KnowledgeVault] write failed:", error)
 		}

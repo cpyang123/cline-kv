@@ -55,6 +55,7 @@ import { DiffEditRow } from "./DiffEditRow"
 import ErrorRow from "./ErrorRow"
 import { FeatureTip } from "./FeatureTip"
 import HookMessage from "./HookMessage"
+import { KnowledgeVaultRow } from "./KnowledgeVaultRow"
 import { MarkdownRow } from "./MarkdownRow"
 import NewTaskPreview from "./NewTaskPreview"
 import PlanCompletionOutputRow from "./PlanCompletionOutputRow"
@@ -1043,6 +1044,8 @@ export const ChatRowContent = memo(
 						)
 					case "compaction":
 						return <CompactionRow message={message} />
+					case "knowledge_vault":
+						return <KnowledgeVaultRow message={message} />
 					case "cloud_provisioning":
 						return <CloudProvisioningRow active={lastModifiedMessage?.ts === message.ts} message={message} />
 					default:
