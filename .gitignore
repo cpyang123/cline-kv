@@ -5,6 +5,8 @@ node_modules
 tmp
 .vscode-test/
 *.vsix
+# Installable Cline KV builds are committed under releases/ (see README).
+!releases/cline-kv-*.vsix
 
 .DS_Store
 .idea

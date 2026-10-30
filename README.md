@@ -126,7 +126,25 @@ npm install @cline/sdk
 This fork adds two things to Cline, both switchable from the settings UI:
 
 - **Knowledge Vault** (Settings → Features → Knowledge Vault): cross-session repository memory, defaulting to the `v5knote` arm of `knowledge-vault-project@chainswe-v5-note-arm`. After each completed task a writer call distills the session into one two-block note (FILES / STATUS / VERIFY / DID + CONTEXT) with the branch's prompt and caps; the workspace's notes are injected into the first turn of later tasks. Notes are stored in `.cline/knowledge-vault/notes.jsonl` inside the workspace. Recalls and writes show as small expandable markers in the chat, and the brain icon in the navbar opens the Memory view (this task's memory plus the whole workspace vault, with delete, clear and open-file actions). The toggle applies to the next run; sub-settings choose the note template (v5 two-block or the paper's v3 fused notes), the write mode (separate call or the later in-session `v5inline`) and the writer (task model or GoodVision SmartRouter). See `docs/features/knowledge-vault.mdx`.
-- **GoodVision SmartRouter provider** (Settings → API Configuration → GoodVision SmartRouter): GoodVision's OpenAI-compatible gateway with policy-driven routing (`auto`) and a live model market in the picker. The router refuses native tool definitions, so the provider emulates tool calling through the prompt (`promptToolsMiddleware` in `sdk/packages/llms`), which lets tasks run through it. Defaults to the test host; set the base URL to `https://api.goodvision.tech/v1` for production. See `docs/provider-config/goodvision.mdx`.
+- **GoodVision SmartRouter provider** (Settings → API Configuration → GoodVision SmartRouter): GoodVision's OpenAI-compatible gateway with policy-driven routing (`auto`) and a live model market in the picker. Each session first tries native tool calling; if the key's routing policy refuses tools (the evaluation keys do), the provider falls back to emulating tool calls through the prompt (`sdk/packages/llms/src/providers/middleware/`). The test host also closes streams after ~30 s, which the provider turns into a clean "continue in smaller steps" cut. Defaults to the test host; set the base URL to `https://api.goodvision.tech/v1` for production. See `docs/provider-config/goodvision.mdx`.
+
+### Install from the VSIX (no marketplace)
+
+Cline KV is not on the VS Code Marketplace. Every build is committed as a `.vsix` under [`releases/`](releases/) and installs like any extension package. The extension id is `saoudrizwan.cline-kv`, so it lives side by side with marketplace Cline and a marketplace auto-update never replaces it. Builds are numbered `4.1.26-kv.<n>`; the number shows as the extension's version in the Extensions view, and `releases/builds.log` in the dist folder of a build machine maps it to the commit it came from.
+
+1. Download the newest `cline-kv-*.vsix` from [`releases/`](releases/) (open the file on GitHub and use **Download raw file**).
+2. Install it, either way:
+   - **Extensions view** → the `···` menu (top right of the view) → **Install from VSIX...** → pick the file.
+   - **Command line** (the `code` command; in a VS Code Server / Remote-SSH window run it in the integrated terminal of that remote, with the file on the remote machine):
+
+     ```sh
+     code --install-extension cline-kv-4.1.26-kv.2.vsix --force
+     ```
+
+     `--force` is required because the suffixed version sorts below plain `4.1.26` for an already installed build; later numbers (`kv.3` over `kv.2`) upgrade without it.
+3. Reload the window (**Developer: Reload Window**). "Cline KV" appears in the activity bar; configure a provider under Settings → API Configuration (for GoodVision, paste the SmartRouter key).
+
+To build your own: from `apps/vscode`, `bun run build:production` then `node scripts/package-kv.mjs`. The script numbers the build, writes `dist/cline-kv-4.1.26-kv.<n>.vsix`, and copies it into `releases/` for committing (`KV_RELEASE_DIR=` skips the copy).
 
 Code: `apps/vscode/src/core/knowledge-vault/` (vault, writer, hooks), `sdk/packages/llms/src/providers/builtins.ts` (provider spec).
 
