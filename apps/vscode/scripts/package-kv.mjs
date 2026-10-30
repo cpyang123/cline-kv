@@ -18,10 +18,8 @@
  * installed version, and `<out dir>/builds.log` records which commit each
  * number was built from. `KV_BUILD_VERSION` overrides the whole version.
  *
- * The packaged file is also copied to the repository's `releases/` folder
- * (replacing any earlier `cline-kv-*.vsix` there), which is committed so the
- * build can be installed from the repository without the marketplace (see the
- * root README). `KV_RELEASE_DIR` points it elsewhere; an empty value skips it.
+ * Builds are published as GitHub Releases, not committed: run
+ * `node scripts/release-kv.mjs` afterwards (see that script and the root README).
  *
  * Usage (after `bun run build:production`):
  *   node scripts/package-kv.mjs              # dist/cline-kv-<version>-kv.<n>.vsix
@@ -41,8 +39,6 @@ const originalName = "claude-dev"
 const name = process.env.KV_EXTENSION_NAME || "cline-kv"
 const displayName = process.env.KV_EXTENSION_DISPLAY_NAME || "Cline KV"
 const outDir = process.env.KV_VSIX_DIR || path.join(projectRoot, "dist")
-const releaseDir =
-	process.env.KV_RELEASE_DIR === undefined ? path.join(projectRoot, "..", "..", "releases") : process.env.KV_RELEASE_DIR
 
 const originalPackageJson = fs.readFileSync(packageJsonPath, "utf8")
 const baseVersion = JSON.parse(originalPackageJson).version
@@ -136,16 +132,7 @@ try {
 	fs.writeFileSync(buildNumberPath, `${buildNumber}\n`)
 	fs.appendFileSync(buildLogPath, `${new Date().toISOString()} ${version} ${commit}${dirty ? "+dirty" : ""} ${vsixPath}\n`)
 	console.log(`\nPackaged ${displayName} (${name} ${version}, commit ${commit}${dirty ? ", dirty tree" : ""}) -> ${vsixPath}`)
-	if (releaseDir) {
-		// One installable build per repository state: the newest replaces the rest.
-		fs.mkdirSync(releaseDir, { recursive: true })
-		for (const entry of fs.readdirSync(releaseDir)) {
-			if (entry.startsWith(`${name}-`) && entry.endsWith(".vsix")) fs.rmSync(path.join(releaseDir, entry))
-		}
-		const releasePath = path.join(releaseDir, path.basename(vsixPath))
-		fs.copyFileSync(vsixPath, releasePath)
-		console.log(`Copied to ${releasePath} (commit it so the build is installable from the repository)`)
-	}
+	console.log(`Publish it with: node scripts/release-kv.mjs ${vsixPath}`)
 } finally {
 	if (didSwapReadme) restoreMarketplaceReadme()
 	if (didRenameLink) fs.renameSync(renamedLink, originalLink)

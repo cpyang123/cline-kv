@@ -130,21 +130,21 @@ This fork adds two things to Cline, both switchable from the settings UI:
 
 ### Install from the VSIX (no marketplace)
 
-Cline KV is not on the VS Code Marketplace. Every build is committed as a `.vsix` under [`releases/`](releases/) and installs like any extension package. The extension id is `saoudrizwan.cline-kv`, so it lives side by side with marketplace Cline and a marketplace auto-update never replaces it. Builds are numbered `4.1.26-kv.<n>`; the number shows as the extension's version in the Extensions view, and `releases/builds.log` in the dist folder of a build machine maps it to the commit it came from.
+Cline KV is not on the VS Code Marketplace. Every build is published on this repository's [Releases page](https://github.com/cpyang123/cline-kv/releases) as a `.vsix` asset and installs like any extension package. The extension id is `saoudrizwan.cline-kv`, so it lives side by side with marketplace Cline and a marketplace auto-update never replaces it. Builds are numbered `4.1.26-kv.<n>` (release tag `v4.1.26-kv.<n>`); the number shows as the extension's version in the Extensions view, and each release's notes name the commit it was built from.
 
-1. Download the newest `cline-kv-*.vsix` from [`releases/`](releases/) (open the file on GitHub and use **Download raw file**).
+1. Open the [latest release](https://github.com/cpyang123/cline-kv/releases/latest) and download the `cline-kv-*.vsix` asset.
 2. Install it, either way:
    - **Extensions view** → the `···` menu (top right of the view) → **Install from VSIX...** → pick the file.
    - **Command line** (the `code` command; in a VS Code Server / Remote-SSH window run it in the integrated terminal of that remote, with the file on the remote machine):
 
      ```sh
-     code --install-extension cline-kv-4.1.26-kv.2.vsix --force
+     code --install-extension cline-kv-4.1.26-kv.4.vsix --force
      ```
 
-     `--force` is required because the suffixed version sorts below plain `4.1.26` for an already installed build; later numbers (`kv.3` over `kv.2`) upgrade without it.
+     `--force` is required because the suffixed version sorts below plain `4.1.26` for an already installed build; later numbers (`kv.5` over `kv.4`) upgrade without it.
 3. Reload the window (**Developer: Reload Window**). "Cline KV" appears in the activity bar; configure a provider under Settings → API Configuration (for GoodVision, paste the SmartRouter key).
 
-To build your own: from `apps/vscode`, `bun run build:production` then `node scripts/package-kv.mjs`. The script numbers the build, writes `dist/cline-kv-4.1.26-kv.<n>.vsix`, and copies it into `releases/` for committing (`KV_RELEASE_DIR=` skips the copy).
+**Publishing a build** (maintainers): from `apps/vscode`, `bun run build:production`, then `node scripts/package-kv.mjs` (numbers the build and writes `dist/cline-kv-4.1.26-kv.<n>.vsix`), push the commit it was built from, and run `node scripts/release-kv.mjs` with either the GitHub CLI logged in or `GH_TOKEN` set to a fine-grained token that has "Contents: read and write" on this repository. The script creates the `v4.1.26-kv.<n>` release at that commit and uploads the VSIX; re-running for the same build replaces the asset.
 
 Code: `apps/vscode/src/core/knowledge-vault/` (vault, writer, hooks), `sdk/packages/llms/src/providers/builtins.ts` (provider spec).
 
