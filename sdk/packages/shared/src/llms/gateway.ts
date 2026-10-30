@@ -135,12 +135,17 @@ export interface GatewayProviderMetadata {
 	 */
 	imageTransport?: "openrouter";
 	/**
-	 * `prompt`: the endpoint rejects native tool definitions (e.g. GoodVision's
-	 * SmartRouter under its default policy), so tools are described in the
-	 * prompt and the model's `<tool_call>` text is parsed back into tool
-	 * calls (see `promptToolsMiddleware` in `@cline/llms`).
+	 * `prompt`: the endpoint rejects native tool definitions, so tools are
+	 * described in the prompt and the model's `<tool_call>` text is parsed
+	 * back into tool calls (see `promptToolsMiddleware` in `@cline/llms`).
+	 * `auto`: the endpoint may accept native tools depending on server-side
+	 * configuration (GoodVision's SmartRouter: the key's routing policy must
+	 * have tool-capable model offers, else every tool-bearing request answers
+	 * 422 `no_candidate`); the session's first tool-bearing request is sent
+	 * natively and, on that refusal, re-sent through the prompt protocol,
+	 * which the session then keeps (see `adaptive-tool-transport.ts`).
 	 */
-	toolTransport?: "prompt";
+	toolTransport?: "prompt" | "auto";
 	/**
 	 * Retry responses with status 502/503/504 at the fetch layer with
 	 * exponential backoff, for gateways that pass upstream outages straight

@@ -9,6 +9,7 @@ import { modelProducesImages } from "@cline/shared";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { wrapLanguageModel } from "ai";
 import { ensureFetch, resolveApiKey } from "../http";
+import { createAdaptiveToolTransportMiddleware } from "../middleware/adaptive-tool-transport";
 import { promptToolsMiddleware } from "../middleware/prompt-tools";
 import { splitToolImagesMiddleware } from "../middleware/split-tool-images";
 import { isOpenAIReasoningEraModelId } from "../model-facts";
@@ -336,6 +337,21 @@ export function createSuccessDataResponseFetch(
 	return responseEnvelopeFetch;
 }
 
+/**
+ * What an adaptive tool-transport decision is remembered under: the session
+ * (its `X-Task-ID` request header, set by the session factory), else the
+ * endpoint itself for standalone handlers without a session.
+ */
+function toolTransportKey(context: GatewayProviderContext): string {
+	const headers = context.config.headers ?? {};
+	for (const [name, value] of Object.entries(headers)) {
+		if (name.toLowerCase() === "x-task-id" && value?.trim()) {
+			return `session:${value.trim()}`;
+		}
+	}
+	return `endpoint:${context.provider.id}|${context.config.baseUrl ?? ""}`;
+}
+
 export async function createOpenAICompatibleProviderModule(
 	config: GatewayResolvedProviderConfig,
 	context: GatewayProviderContext,
@@ -392,6 +408,7 @@ export async function createOpenAICompatibleProviderModule(
 					fetch: providerFetch,
 				})
 			: undefined;
+	const toolTransport = context.provider.metadata?.toolTransport;
 	return {
 		// Wrap each constructed model with `splitToolImagesMiddleware` so
 		// `role:"tool"` messages whose `output.type === 'content'` carries
@@ -414,10 +431,24 @@ export async function createOpenAICompatibleProviderModule(
 					// `toolTransport: "prompt"` endpoints refuse native tool
 					// definitions: tools are emulated through the prompt first,
 					// so no tool messages remain for the image split to handle.
+					// `"auto"` endpoints may or may not accept them (GoodVision,
+					// depending on the key's routing policy): the session's first
+					// tool-bearing request decides, see adaptive-tool-transport.ts.
 					middleware:
-						context.provider.metadata?.toolTransport === "prompt"
+						toolTransport === "prompt"
 							? [promptToolsMiddleware, splitToolImagesMiddleware]
-							: splitToolImagesMiddleware,
+							: toolTransport === "auto"
+								? [
+										createAdaptiveToolTransportMiddleware({
+											key: toolTransportKey(context),
+											onDecision: (decision) =>
+												context.logger?.log(
+													`[${context.provider.id}] tool transport: ${decision.transport} (${decision.reason})`,
+												),
+										}),
+										splitToolImagesMiddleware,
+									]
+								: splitToolImagesMiddleware,
 				}),
 			imageGeneration: (modelId) =>
 				vercelGateway

@@ -1095,10 +1095,12 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		modelsSourceUrl: `${GOODVISION_TEST_BASE_URL}/models`,
 		defaults: { baseUrl: GOODVISION_TEST_BASE_URL },
 		modelsFactory: buildGoodVisionModels,
-		// The router's routing policy admits no model offer for requests that
-		// declare tools (422 no_candidate), so tools go through the prompt.
+		// Whether the key's routing policy admits model offers for requests
+		// that declare tools is a console-side setting (evaluation keys: no,
+		// 422 no_candidate on every protocol), so each session probes it with
+		// its first tool-bearing request and falls back to the prompt protocol.
 		metadata: {
-			toolTransport: "prompt",
+			toolTransport: "auto",
 			// Upstream outages are passed through as 502 and often clear within
 			// seconds; ride them out before failing a task.
 			upstreamRetry: { attempts: 5, baseDelayMs: 5_000, maxDelayMs: 30_000 },
