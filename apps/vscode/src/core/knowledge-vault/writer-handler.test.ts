@@ -18,6 +18,15 @@ describe("writerHandlerOptions", () => {
 		expect(writerHandlerOptions("goodvision", "auto")).not.toHaveProperty("temperature")
 	})
 
+	it("omits the temperature when the task itself runs on GoodVision or on a router's auto alias", () => {
+		// The actor doubles as the writer: the request still goes through the router,
+		// whose `auto` route refuses a pinned temperature with 502s.
+		expect(writerHandlerOptions("task", "auto", "goodvision")).toEqual({ disableReasoning: true, maxOutputTokens: 900 })
+		expect(writerHandlerOptions("task", "claude-opus-5", "goodvision")).not.toHaveProperty("temperature")
+		expect(writerHandlerOptions("task", "auto", "openrouter")).not.toHaveProperty("temperature")
+		expect(writerHandlerOptions("task", "claude-sonnet-4-5", "anthropic")).toMatchObject({ temperature: 0 })
+	})
+
 	it("recognises the OpenAI reasoning-era ids the SDK renames max_tokens for", () => {
 		for (const id of ["gpt-5", "gpt-5.5", "openai/gpt-6-astra", "o1", "o3", "o4-mini", "GPT-5.2"]) {
 			expect(modelRejectsTemperature(id)).toBe(true)

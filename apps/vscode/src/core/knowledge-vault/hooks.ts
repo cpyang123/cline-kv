@@ -170,6 +170,9 @@ export function buildKnowledgeVaultHooks(options: KnowledgeVaultHooksOptions): K
 				const result = await distillNote({ handler, material: buildSessionMaterial(messages), template })
 				if (!result.note) {
 					const detail = result.error ?? "the writer produced no valid note"
+					Logger.warn(
+						`[KnowledgeVault] write failed (${model.providerId ?? "?"}/${model.id ?? "?"}, attempts=${result.attempts}): ${detail}`,
+					)
 					options.emitHookMessage?.(
 						buildKnowledgeVaultMessage(
 							{

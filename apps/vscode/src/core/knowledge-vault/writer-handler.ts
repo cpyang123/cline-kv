@@ -31,12 +31,23 @@ export function modelRejectsTemperature(modelId: string | undefined): boolean {
 
 /**
  * Request options of a writer call: no extended thinking, 900 output tokens, and
- * temperature 0 unless the model rejects it. The GoodVision gateway never gets a
- * temperature, mirroring the harness's strict mode for OpenAI-protocol gateways
- * (its `auto` route may land on a model that rejects it).
+ * temperature 0 unless the model rejects it. A call that goes through the
+ * GoodVision gateway never gets a temperature, whether the GoodVision writer is
+ * selected or the task itself runs on GoodVision: this mirrors the harness's
+ * strict mode for OpenAI-protocol gateways, and the router's `auto` route answers
+ * a request that carries `temperature: 0` with 502 `upstream_unavailable` on
+ * every attempt (observed 2026-10-30), so pinning it there makes the writer fail
+ * instead of making it deterministic. A bare `auto` model id is treated the same
+ * way for any provider, since it is a router alias and not a model.
  */
-export function writerHandlerOptions(writer: "task" | "goodvision", modelId: string | undefined): BuildApiHandlerOptions {
-	const pinTemperature = writer === "task" && !modelRejectsTemperature(modelId)
+export function writerHandlerOptions(
+	writer: "task" | "goodvision",
+	modelId: string | undefined,
+	providerId?: string,
+): BuildApiHandlerOptions {
+	const routesThroughGateway =
+		writer === "goodvision" || providerId === GOODVISION_PROVIDER_ID || modelId?.trim().toLowerCase() === "auto"
+	const pinTemperature = !routesThroughGateway && !modelRejectsTemperature(modelId)
 	return {
 		disableReasoning: true,
 		maxOutputTokens: WRITER_MAX_OUTPUT_TOKENS,
@@ -91,5 +102,9 @@ export async function buildKnowledgeVaultWriterHandler(stateManager: StateManage
 		writer === "goodvision"
 			? configuration.actModeApiModelId
 			: resolveModelId(configuration.actModeApiProvider ?? "cline", "act", configuration)
-	return buildApiHandlerWithHostContext(configuration, "act", writerHandlerOptions(writer, modelId))
+	return buildApiHandlerWithHostContext(
+		configuration,
+		"act",
+		writerHandlerOptions(writer, modelId, configuration.actModeApiProvider),
+	)
 }
