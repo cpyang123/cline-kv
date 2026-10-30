@@ -10,6 +10,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { wrapLanguageModel } from "ai";
 import { ensureFetch, resolveApiKey } from "../http";
 import { createAdaptiveToolTransportMiddleware } from "../middleware/adaptive-tool-transport";
+import { createStreamTimeLimitMiddleware } from "../middleware/stream-time-limit";
 import { promptToolsMiddleware } from "../middleware/prompt-tools";
 import { splitToolImagesMiddleware } from "../middleware/split-tool-images";
 import { isOpenAIReasoningEraModelId } from "../model-facts";
@@ -409,6 +410,21 @@ export async function createOpenAICompatibleProviderModule(
 				})
 			: undefined;
 	const toolTransport = context.provider.metadata?.toolTransport;
+	const streamTimeLimitMs = context.provider.metadata?.streamTimeLimitMs;
+	// Innermost: sees the raw provider stream, so the tool-transport layers
+	// above it receive a well-formed stream with a `length` finish at the cut.
+	const streamTimeLimit =
+		typeof streamTimeLimitMs === "number" && streamTimeLimitMs > 0
+			? [
+					createStreamTimeLimitMiddleware({
+						limitMs: streamTimeLimitMs,
+						onCut: ({ elapsedMs, limitMs }) =>
+							context.logger?.log(
+								`[${context.provider.id}] stream ended at ${Math.round(elapsedMs / 1000)}s by the client (provider closes streams at ~${Math.round(limitMs / 1000)}s); the turn continues as an output-limit cut`,
+							),
+					}),
+				]
+			: [];
 	return {
 		// Wrap each constructed model with `splitToolImagesMiddleware` so
 		// `role:"tool"` messages whose `output.type === 'content'` carries
@@ -436,7 +452,11 @@ export async function createOpenAICompatibleProviderModule(
 					// tool-bearing request decides, see adaptive-tool-transport.ts.
 					middleware:
 						toolTransport === "prompt"
-							? [promptToolsMiddleware, splitToolImagesMiddleware]
+							? [
+									promptToolsMiddleware,
+									splitToolImagesMiddleware,
+									...streamTimeLimit,
+								]
 							: toolTransport === "auto"
 								? [
 										createAdaptiveToolTransportMiddleware({
@@ -447,8 +467,9 @@ export async function createOpenAICompatibleProviderModule(
 												),
 										}),
 										splitToolImagesMiddleware,
+										...streamTimeLimit,
 									]
-								: splitToolImagesMiddleware,
+								: [splitToolImagesMiddleware, ...streamTimeLimit],
 				}),
 			imageGeneration: (modelId) =>
 				vercelGateway

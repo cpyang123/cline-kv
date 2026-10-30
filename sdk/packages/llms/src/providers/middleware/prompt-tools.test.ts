@@ -490,6 +490,38 @@ describe("createPromptToolsStream", () => {
 		).toBe("tool-calls");
 	});
 
+	it("releases a block cut off by the output limit as text, so the runtime's cut-off recovery applies", async () => {
+		const parts = await collect(
+			createPromptToolsStream(
+				streamOf([
+					{ type: "text-start", id: "t1" },
+					{
+						type: "text-delta",
+						id: "t1",
+						delta: 'Writing it.\n<tool_call>{"name":"write_to_file","arguments":{"content":"abc',
+					},
+					{ type: "text-end", id: "t1" },
+					finish("length"),
+				]),
+			),
+		);
+		expect(parts.some((p) => p.type === "tool-call")).toBe(false);
+		expect(textDeltas(parts)).toBe(
+			'Writing it.\n<tool_call>{"name":"write_to_file","arguments":{"content":"abc',
+		);
+		expect(parts.map((p) => p.type)).toEqual([
+			"text-start",
+			"text-delta",
+			"text-delta",
+			"text-end",
+			"finish",
+		]);
+		expect(
+			(parts.at(-1) as Extract<LanguageModelV4StreamPart, { type: "finish" }>)
+				.finishReason.unified,
+		).toBe("length");
+	});
+
 	it("emits two calls from one turn and reopens text between them", async () => {
 		const parts = await collect(
 			createPromptToolsStream(

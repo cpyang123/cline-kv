@@ -467,10 +467,22 @@ export class ToolCallTextParser {
 		}
 	}
 
-	/** Release whatever is pending at the end of the text: an unclosed block is parsed if it is complete JSON. */
-	flush(): ToolCallTextEvent[] {
+	/** Whether the text so far opened a tool_call block that has not closed yet. */
+	isInsideCall(): boolean {
+		return this.inCall;
+	}
+
+	/**
+	 * Release whatever is pending at the end of the text: an unclosed block is
+	 * parsed if it is complete JSON, reported as malformed otherwise, or, with
+	 * `unclosedAsText` (the reply was cut off by an output limit), released as
+	 * text so the runtime's cut-off recovery applies instead of a parse error.
+	 */
+	flush(options?: { unclosedAsText?: boolean }): ToolCallTextEvent[] {
 		const events: ToolCallTextEvent[] = [];
-		if (this.inCall) {
+		if (this.inCall && options?.unclosedAsText) {
+			events.push({ type: "text", text: `${TOOL_CALL_OPEN}${this.buffer}` });
+		} else if (this.inCall) {
 			const call = parseToolCallBlock(this.buffer);
 			events.push(
 				call
@@ -504,7 +516,7 @@ export function createPromptToolsStream(
 ): ReadableStream<LanguageModelV4StreamPart> {
 	const parser = new ToolCallTextParser();
 	let textOpen: string | undefined;
-	let textEnded = false;
+	let flushed = false;
 	let calls = 0;
 
 	const emitEvents = (
@@ -561,16 +573,27 @@ export function createPromptToolsStream(
 						emitEvents(parser.feed(part.delta), controller);
 						return;
 					case "text-end":
+						// An unclosed block waits for the finish reason: cut off by an
+						// output limit it is text to continue, otherwise a malformed call.
+						if (parser.isInsideCall()) {
+							return;
+						}
 						emitEvents(parser.flush(), controller);
+						flushed = true;
 						if (textOpen !== undefined) {
 							controller.enqueue({ type: "text-end", id: textOpen });
 							textOpen = undefined;
 						}
-						textEnded = true;
 						return;
 					case "finish": {
-						if (!textEnded) {
-							emitEvents(parser.flush(), controller);
+						if (!flushed) {
+							emitEvents(
+								parser.flush({
+									unclosedAsText: part.finishReason.unified === "length",
+								}),
+								controller,
+							);
+							flushed = true;
 						}
 						if (textOpen !== undefined) {
 							controller.enqueue({ type: "text-end", id: textOpen });
@@ -588,7 +611,10 @@ export function createPromptToolsStream(
 				}
 			},
 			flush(controller) {
-				emitEvents(parser.flush(), controller);
+				if (!flushed) {
+					emitEvents(parser.flush(), controller);
+					flushed = true;
+				}
 				if (textOpen !== undefined) {
 					controller.enqueue({ type: "text-end", id: textOpen });
 					textOpen = undefined;

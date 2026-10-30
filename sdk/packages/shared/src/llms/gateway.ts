@@ -147,6 +147,22 @@ export interface GatewayProviderMetadata {
 	 */
 	toolTransport?: "prompt" | "auto";
 	/**
+	 * The endpoint closes every streaming response this many milliseconds
+	 * after it started, whatever is still flowing (GoodVision's test host:
+	 * about 30 s). Streams are ended by the client a little earlier with a
+	 * `length` finish, so the partial output is kept and the agent continues
+	 * in smaller steps instead of failing on a dropped connection (see
+	 * `stream-time-limit.ts` in `@cline/llms`). Set below the measured cap.
+	 */
+	streamTimeLimitMs?: number;
+	/**
+	 * Reasoning effort sent when the caller expressed no preference at all,
+	 * for endpoints where the models' own default would not fit the stream
+	 * time limit (a reasoning model may think silently for 20 s before its
+	 * first token). An explicit effort, or reasoning turned off, wins.
+	 */
+	defaultReasoningEffort?: ReasoningEffort;
+	/**
 	 * Retry responses with status 502/503/504 at the fetch layer with
 	 * exponential backoff, for gateways that pass upstream outages straight
 	 * through and recover within seconds (GoodVision's SmartRouter). Applies on

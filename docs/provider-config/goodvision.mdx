@@ -25,6 +25,16 @@ The SmartRouter matches each request against "model offers" and filters them by 
 
 It works with every model that follows the format reliably (the Claude and GPT ids in the market do). Should GoodVision enable a tool-capable offer for the key, removing the flag from the provider spec restores native tool calling.
 
+## Streaming time limit
+
+The test host closes every streaming response about 30 seconds after it started, whether or not tokens are still flowing (measured on 2026-10-30: a continuously streaming 6000-token reply was cut at 31.0 s with "socket connection was closed unexpectedly"; the error Cline shows is "Failed to process successful response: TypeError: terminated: SocketError: other side closed"). A turn that writes a long file, or a reasoning model that thinks silently for most of the window, cannot finish inside it. The provider works around the cap in three ways:
+
+- **Clean cut at 27 s** (`streamTimeLimitMs`): the client ends the stream itself a few seconds before the cap with an output-limit finish. The partial text is kept and Cline's existing recovery nudges the model to continue in smaller steps (write large files in chunks across several tool calls), instead of the turn failing on a dropped connection. The Cline output channel logs `[goodvision] stream ended at 27s by the client`.
+- **Low reasoning effort by default** (`defaultReasoningEffort`): a reasoning model that thinks for 20 s before its first token leaves no room for output, so requests with no explicit reasoning preference are sent with `reasoning_effort: low`. Choosing an effort in the model settings, or the writer's reasoning-off setting, overrides it.
+- **Pre-content retry**: a stream that dies before producing anything (the whole window spent on prompt processing or reasoning) is retried up to two more times by the SDK's existing network-interruption retry. If it still fails, the error message explains the limit.
+
+None of this raises the cap. Ask GoodVision to lengthen the streaming timeout for the key's environment (30 s is a load-balancer default); the fork then needs nothing changed.
+
 ## Current limitations
 
 - The router does not mask upstream failures: if a model is unavailable upstream, requests to it answer 502 `upstream_unavailable` rather than fall back. Cline retries those responses with backoff (five attempts over about a minute, on top of the SDK's own retries), which rides out the router's short blips; a sustained outage still fails the request. Pin a working model id if `auto` keeps routing to one that is down.

@@ -1101,6 +1101,12 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		// its first tool-bearing request and falls back to the prompt protocol.
 		metadata: {
 			toolTransport: "auto",
+			// The test host closes streaming responses ~30 s after they start
+			// (measured 31.0 s on a continuously streaming reply, 2026-10-30).
+			// End them cleanly before that, and keep silent reasoning short so
+			// a first token arrives inside the window.
+			streamTimeLimitMs: 27_000,
+			defaultReasoningEffort: "low",
 			// Upstream outages are passed through as 502 and often clear within
 			// seconds; ride them out before failing a task.
 			upstreamRetry: { attempts: 5, baseDelayMs: 5_000, maxDelayMs: 30_000 },

@@ -53,7 +53,10 @@ import {
 	isRetryableBeyondSdkRetries,
 } from "./error-classification";
 import { extractErrorMessage } from "./format";
-import { createRetryEmptyResponseMiddleware } from "./middleware/retry-empty-response";
+import {
+	createRetryEmptyResponseMiddleware,
+	isTransientNetworkError,
+} from "./middleware/retry-empty-response";
 import {
 	isAnthropicCompatibleModel,
 	isCerebrasProvider,
@@ -343,7 +346,10 @@ export function buildAiSdkStreamConfig(
 	request: GatewayStreamRequest,
 	context: GatewayProviderContext,
 ): Partial<CallSettings> {
-	const reasoning = resolvePortableReasoning(request, { context });
+	const reasoning = resolvePortableReasoning(
+		withDefaultReasoning(request, context),
+		{ context },
+	);
 	return {
 		...(request.maxTokens !== undefined
 			? { maxOutputTokens: request.maxTokens }
@@ -1511,6 +1517,46 @@ function captureStreamError(
 	};
 }
 
+/**
+ * The request with the provider's default reasoning effort applied when the
+ * caller expressed no preference at all (an explicit effort, or reasoning
+ * turned off, is left alone). See `GatewayProviderMetadata.defaultReasoningEffort`.
+ */
+function withDefaultReasoning(
+	request: GatewayStreamRequest,
+	context: GatewayProviderContext,
+): GatewayStreamRequest {
+	// Tests call the config builder without a context; a missing one means no default.
+	const effort = context?.provider?.metadata?.defaultReasoningEffort;
+	if (!effort || request.reasoning !== undefined) {
+		return request;
+	}
+	return { ...request, reasoning: { effort } };
+}
+
+/**
+ * Explain a mid-stream network death on an endpoint known to cap streaming
+ * time (see `GatewayProviderMetadata.streamTimeLimitMs`): the client ends
+ * streams early only once they carry content, so a death that still reaches
+ * the user almost always means nothing arrived inside the window.
+ */
+function withStreamLimitHint(
+	message: string | undefined,
+	error: unknown,
+	context: GatewayProviderContext,
+): string | undefined {
+	const limitMs = context.provider.metadata?.streamTimeLimitMs;
+	if (
+		!message ||
+		typeof limitMs !== "number" ||
+		!isTransientNetworkError(error)
+	) {
+		return message;
+	}
+	const capSeconds = Math.round(limitMs / 1000) + 3;
+	return `${message}. ${context.provider.id} closes streaming responses about ${capSeconds}s after they start, and this one was cut before it could be ended cleanly, usually because the model produced nothing for most of that window (prompt processing or reasoning over a large context). Retry if it was a slow start; otherwise lower the reasoning effort or start a new task with a smaller context.`;
+}
+
 async function* emitAiSdkEvents(
 	stream: AiSdkStreamResult,
 	request: GatewayStreamRequest,
@@ -2058,7 +2104,7 @@ async function* emitAiSdkEvents(
 		type: "finish",
 		reason: streamError ? "error" : mapFinishReason(finishReason),
 		...(finishRequestId ? { requestId: finishRequestId } : {}),
-		error: streamError?.message,
+		error: withStreamLimitHint(streamError?.message, streamError?.error, context),
 		errorClass: streamError?.errorClass,
 		errorRetryable: streamError?.retryable,
 		errorReported: streamError?.reported,
@@ -2425,7 +2471,10 @@ function createAiSdkProvider(
 					messagesSystemPrompt,
 				);
 				const portableReasoning = reconcilePortableReasoning(
-					resolvePortableReasoning(request, { adapter: kind, context }),
+					resolvePortableReasoning(withDefaultReasoning(request, context), {
+						adapter: kind,
+						context,
+					}),
 					providerOptions,
 				);
 				// Reasoning is decided once above, after provider options are known.
@@ -2532,7 +2581,7 @@ function createAiSdkProvider(
 				yield {
 					type: "finish",
 					reason: "error",
-					error: captured.message,
+					error: withStreamLimitHint(captured.message, captured.error, context),
 					errorClass: captured.errorClass,
 					errorRetryable: captured.retryable,
 					errorReported: captured.reported,
