@@ -169,6 +169,11 @@ export interface AgentUsageEvent extends AgentEventMetadata {
 	cost?: number;
 	/** Reasoning/thinking tokens for this turn, already excluded from outputTokens */
 	reasoningTokenCount?: number;
+	/**
+	 * Model that served this request, as reported by the provider (a dated id,
+	 * or a router's choice when the request named `auto`).
+	 */
+	responseModelId?: string;
 
 	/** Accumulated totals */
 	totalInputTokens: number;

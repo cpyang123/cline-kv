@@ -699,6 +699,21 @@ describe("RuntimeEventAdapter — usage rolling totals", () => {
 		});
 	});
 
+	it("forwards the served model id when the runtime reports one", () => {
+		const out = adapter.translate({
+			type: "usage-updated",
+			snapshot: makeSnapshot(),
+			usage: makeUsage({ inputTokens: 10, outputTokens: 2 }),
+			responseModelId: "gpt-5.2-2025-12-11",
+		});
+		expect(out[0]).toMatchObject({
+			type: "usage",
+			inputTokens: 10,
+			outputTokens: 2,
+			responseModelId: "gpt-5.2-2025-12-11",
+		});
+	});
+
 	it("second usage-updated: delta = (next - prior), totals are accumulated", () => {
 		adapter.translate({
 			type: "usage-updated",

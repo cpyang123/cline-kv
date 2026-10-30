@@ -1953,6 +1953,7 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 				cacheWrites: usageEvent.cacheWrites,
 				cacheReads: usageEvent.cacheReads,
 				cost: usageEvent.totalCost,
+				...(event.responseModelId ? { servedModel: event.responseModelId } : {}),
 			}
 			messages.push({
 				ts: state.nextTs(),

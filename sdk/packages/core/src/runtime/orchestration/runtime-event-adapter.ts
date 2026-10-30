@@ -245,7 +245,7 @@ export class RuntimeEventAdapter {
 			case "tool-finished":
 				return this.translateToolFinished(event);
 			case "usage-updated":
-				return this.translateUsage(event.usage);
+				return this.translateUsage(event.usage, event.responseModelId);
 			case "status-notice":
 				return [
 					{
@@ -357,7 +357,10 @@ export class RuntimeEventAdapter {
 		];
 	}
 
-	private translateUsage(next: AgentUsage): AgentEvent[] {
+	private translateUsage(
+		next: AgentUsage,
+		responseModelId?: string,
+	): AgentEvent[] {
 		const deltaInput = next.inputTokens - this.lastUsage.inputTokens;
 		const deltaOutput = next.outputTokens - this.lastUsage.outputTokens;
 		const deltaCacheRead =
@@ -397,6 +400,7 @@ export class RuntimeEventAdapter {
 				totalCacheWriteTokens:
 					next.cacheWriteTokens === 0 ? undefined : next.cacheWriteTokens,
 				totalCost: next.totalCost,
+				...(responseModelId ? { responseModelId } : {}),
 			},
 		];
 	}

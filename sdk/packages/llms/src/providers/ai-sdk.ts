@@ -2028,10 +2028,26 @@ async function* emitAiSdkEvents(
 		metadataToUse = finishProviderMetadata;
 	}
 
+	// The provider's own account of which model answered (a dated id, or a
+	// router's choice for `auto`); surfaced to hosts next to the usage.
+	let responseModelId: string | undefined;
+	if (!streamError && stream.response) {
+		try {
+			const modelId = (await stream.response)?.modelId;
+			responseModelId =
+				typeof modelId === "string" && modelId.trim()
+					? modelId.trim()
+					: undefined;
+		} catch {
+			responseModelId = undefined;
+		}
+	}
+
 	if (usageToEmit) {
 		yield {
 			type: "usage",
 			usage: normalizeUsage(usageToEmit, metadataToUse, pricingValue, request),
+			...(responseModelId ? { responseModelId } : {}),
 		};
 	}
 

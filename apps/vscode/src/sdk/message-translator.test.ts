@@ -2380,6 +2380,26 @@ describe("translateSessionEvent — agent_event content_update", () => {
 // ---------------------------------------------------------------------------
 
 describe("translateSessionEvent — agent_event usage", () => {
+	it("records the model that served the request when the provider reported one", () => {
+		const state = new MessageTranslatorState()
+		const event: CoreSessionEvent = {
+			type: "agent_event",
+			payload: {
+				sessionId: "session-1",
+				event: {
+					type: "usage",
+					inputTokens: 120,
+					outputTokens: 30,
+					cost: 0.001,
+					responseModelId: "gpt-5.2-2025-12-11",
+				} as AgentEvent,
+			},
+		}
+
+		const result = translateSessionEvent(event, state)
+		expect(JSON.parse(result.messages[0].text ?? "{}")).toMatchObject({ servedModel: "gpt-5.2-2025-12-11", cost: 0.001 })
+	})
+
 	it("splits SDK inclusive input tokens into classic disjoint usage buckets", () => {
 		const state = new MessageTranslatorState()
 		const event: CoreSessionEvent = {

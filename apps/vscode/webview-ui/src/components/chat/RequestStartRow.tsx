@@ -3,10 +3,13 @@ import type { Mode } from "@shared/storage/types"
 import type { LucideIcon } from "lucide-react"
 import type React from "react"
 import { useMemo } from "react"
+import { useExtensionState } from "@/context/ExtensionStateContext"
+import { getActiveProviderAndModelId } from "@/hooks/useNormalizedApiConfiguration"
 import { cleanPathPrefix } from "../common/CodeAccordian"
 import { getIconByToolName } from "./chat-view"
 import { isApiReqAbsorbable, isLowStakesTool } from "./chat-view/utils/messageUtils"
 import ErrorRow from "./ErrorRow"
+import { shouldShowServedModel } from "./served-model"
 import { ThinkingRow } from "./ThinkingRow"
 import { TypewriterText } from "./TypewriterText"
 
@@ -23,6 +26,8 @@ interface RequestStartRowProps {
 	isExpanded: boolean
 	handleToggle: () => void
 	retryFailedRequest?: () => Promise<boolean>
+	/** Model that served the request, when the provider reported one. */
+	servedModel?: string
 }
 
 // State type for api_req_started rendering
@@ -142,7 +147,18 @@ export const RequestStartRow: React.FC<RequestStartRowProps> = ({
 	isExpanded,
 	message,
 	retryFailedRequest,
+	servedModel,
 }) => {
+	const { apiConfiguration } = useExtensionState()
+	// The model the user selected for this mode; a router's `auto` or a served id
+	// that differs from it is worth labelling.
+	const selectedModelId = useMemo(() => {
+		try {
+			return getActiveProviderAndModelId(apiConfiguration, mode ?? "act").modelId
+		} catch {
+			return undefined
+		}
+	}, [apiConfiguration, mode])
 	// Derive explicit state
 	const hasError = !!(apiRequestFailedMessage || apiReqStreamingFailedMessage)
 	const hasCost = cost != null
@@ -253,6 +269,12 @@ export const RequestStartRow: React.FC<RequestStartRowProps> = ({
 						showTitle={true}
 					/>
 				))}
+
+			{apiReqState === "final" && shouldShowServedModel(servedModel, selectedModelId) && (
+				<div className="ml-1 mb-1 text-[11px] text-description" data-testid="served-model">
+					answered by <code className="font-mono text-[11px]">{servedModel}</code>
+				</div>
+			)}
 
 			{apiReqState === "error" && (
 				<ErrorRow

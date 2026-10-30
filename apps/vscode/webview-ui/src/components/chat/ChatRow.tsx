@@ -208,12 +208,12 @@ export const ChatRowContent = memo(
 			prevIsLastRef.current = isLast
 		}, [isLast, message.ask, message.say])
 
-		const [cost, _apiReqCancelReason, apiReqStreamingFailedMessage] = useMemo(() => {
+		const [cost, _apiReqCancelReason, apiReqStreamingFailedMessage, servedModel] = useMemo(() => {
 			if (message.text != null && message.say === "api_req_started") {
 				const info: ClineApiReqInfo = JSON.parse(message.text)
-				return [info.cost, info.cancelReason, info.streamingFailedMessage]
+				return [info.cost, info.cancelReason, info.streamingFailedMessage, info.servedModel]
 			}
-			return [undefined, undefined, undefined]
+			return [undefined, undefined, undefined, undefined]
 		}, [message.text, message.say])
 
 		// when resuming task last won't be api_req_failed but a resume_task message so api_req_started will show loading spinner. that's why we just remove the last api_req_started that failed without streaming anything
@@ -844,6 +844,7 @@ export const ChatRowContent = memo(
 								reasoningContent={reasoningContent}
 								responseStarted={responseStarted}
 								retryFailedRequest={retryFailedRequest}
+								servedModel={servedModel}
 							/>
 						)
 					case "api_req_finished":

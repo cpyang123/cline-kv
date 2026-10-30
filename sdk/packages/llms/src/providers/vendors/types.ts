@@ -192,4 +192,6 @@ export interface AiSdkStreamResult {
 	textStream?: AsyncIterable<string>;
 	text?: Promise<string> | string;
 	usage?: Promise<AiSdkStreamUsage | Record<string, unknown>>;
+	/** Response metadata; `modelId` is the model that served the request. */
+	response?: PromiseLike<{ modelId?: string } | undefined>;
 }

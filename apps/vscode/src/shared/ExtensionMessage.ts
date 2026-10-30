@@ -416,6 +416,8 @@ export interface ClineApiReqInfo {
 	cost?: number
 	cancelReason?: ClineApiReqCancelReason
 	streamingFailedMessage?: string
+	/** Model that served the request, as reported by the provider (shown when it differs from the selected model, e.g. a router's `auto`). */
+	servedModel?: string
 }
 
 /**

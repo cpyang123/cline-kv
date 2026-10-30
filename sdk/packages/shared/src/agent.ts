@@ -348,6 +348,11 @@ export type AgentModelEvent =
 	| {
 			type: "usage";
 			usage: Partial<AgentUsage>;
+			/**
+			 * Model that served the request, as reported by the provider (a dated
+			 * id, or a router's choice when the request named `auto`).
+			 */
+			responseModelId?: string;
 	  }
 	| {
 			type: "finish";
@@ -710,6 +715,8 @@ export type AgentRuntimeEvent =
 			type: "usage-updated";
 			snapshot: AgentRuntimeStateSnapshot;
 			usage: AgentUsage;
+			/** Model that served the request this update accounts for, when the provider reported it. */
+			responseModelId?: string;
 	  }
 	| {
 			type: "turn-finished";

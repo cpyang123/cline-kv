@@ -1999,7 +1999,7 @@ export class AgentRuntime {
 					) {
 						this.state.lastRequestInputTokens = event.usage.inputTokens;
 					}
-					await this.updateUsage(event.usage);
+					await this.updateUsage(event.usage, event.responseModelId);
 					break;
 				}
 				case "finish": {
@@ -2337,7 +2337,10 @@ export class AgentRuntime {
 		return message;
 	}
 
-	private async updateUsage(usage: Partial<AgentUsage>): Promise<void> {
+	private async updateUsage(
+		usage: Partial<AgentUsage>,
+		responseModelId?: string,
+	): Promise<void> {
 		this.state.usage = {
 			inputTokens: this.state.usage.inputTokens + (usage.inputTokens ?? 0),
 			outputTokens: this.state.usage.outputTokens + (usage.outputTokens ?? 0),
@@ -2354,6 +2357,7 @@ export class AgentRuntime {
 			type: "usage-updated",
 			snapshot: this.snapshot(),
 			usage: cloneUsage(this.state.usage),
+			...(responseModelId ? { responseModelId } : {}),
 		});
 	}
 
