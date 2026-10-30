@@ -11,8 +11,15 @@
  * `vsce package` and restored afterwards, so the repository's own package.json
  * is untouched.
  *
+ * Every run gets its own version and file name: `<upstream version>-kv.<n>`,
+ * where `<n>` is a counter kept in `<out dir>/.build-number` and advanced only
+ * when packaging succeeds. The suffix is valid semver (vsce rejects it only on
+ * publish, which this script never does), the Extensions view shows it as the
+ * installed version, and `<out dir>/builds.log` records which commit each
+ * number was built from. `KV_BUILD_VERSION` overrides the whole version.
+ *
  * Usage (after `bun run build:production`):
- *   node scripts/package-kv.mjs              # dist/cline-kv-<version>.vsix
+ *   node scripts/package-kv.mjs              # dist/cline-kv-<version>-kv.<n>.vsix
  *   KV_VSIX_DIR=/some/dir node scripts/package-kv.mjs
  *   KV_EXTENSION_NAME=claude-dev node scripts/package-kv.mjs   # keep Cline's own id (replaces Cline)
  */
@@ -31,8 +38,32 @@ const displayName = process.env.KV_EXTENSION_DISPLAY_NAME || "Cline KV"
 const outDir = process.env.KV_VSIX_DIR || path.join(projectRoot, "dist")
 
 const originalPackageJson = fs.readFileSync(packageJsonPath, "utf8")
-const version = JSON.parse(originalPackageJson).version
+const baseVersion = JSON.parse(originalPackageJson).version
+const buildNumberPath = path.join(outDir, ".build-number")
+const buildLogPath = path.join(outDir, "builds.log")
+
+function readBuildNumber() {
+	try {
+		return Number.parseInt(fs.readFileSync(buildNumberPath, "utf8").trim(), 10) || 0
+	} catch {
+		return 0
+	}
+}
+
+function git(...args) {
+	try {
+		return execFileSync("git", args, { cwd: projectRoot, stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
+	} catch {
+		return ""
+	}
+}
+
+const buildNumber = readBuildNumber() + 1
+const version = process.env.KV_BUILD_VERSION || `${baseVersion}-kv.${buildNumber}`
 const vsixPath = path.join(outDir, `${name}-${version}.vsix`)
+// Recorded before the script touches the tree, so "dirty" means the user's own edits.
+const commit = git("rev-parse", "--short", "HEAD") || "unknown"
+const dirty = git("status", "--porcelain") !== ""
 const nodeModules = path.join(projectRoot, "node_modules")
 const originalLink = path.join(nodeModules, originalName)
 const renamedLink = path.join(nodeModules, name)
@@ -46,17 +77,22 @@ function isWorkspaceSelfLink(linkPath) {
 	}
 }
 
-let didRename = false
+let didRewrite = false
 let didRenameLink = false
 let didSwapReadme = false
 try {
+	// Same rewrite as the nightly build: package name, command ids ("cline." prefix),
+	// display name and activity bar title. src/registry.ts derives the command
+	// prefix from the package name at build time, so the bundle matches. The
+	// build's version goes in the same way, so the bundle and the manifest agree.
+	const rewritten =
+		name !== originalName
+			? originalPackageJson.replaceAll(originalName, name).replaceAll('"cline.', `"${name}.`)
+			: originalPackageJson
+	const pkg = JSON.parse(rewritten)
+	pkg.name = name
+	pkg.version = version
 	if (name !== originalName) {
-		// Same rewrite as the nightly build: package name, command ids ("cline." prefix),
-		// display name and activity bar title. src/registry.ts derives the command
-		// prefix from the package name at build time, so the bundle matches.
-		const rewritten = originalPackageJson.replaceAll(originalName, name).replaceAll('"cline.', `"${name}.`)
-		const pkg = JSON.parse(rewritten)
-		pkg.name = name
 		pkg.displayName = displayName
 		// `activitybar` is an array of view containers; retitle each so the
 		// activity bar tooltip distinguishes this build from marketplace Cline.
@@ -64,14 +100,14 @@ try {
 		if (Array.isArray(activitybar)) {
 			for (const container of activitybar) container.title = displayName
 		}
-		fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, "\t"))
-		didRename = true
-		// Keep bun's workspace self-link consistent with the temporary package name
-		// so vsce's dependency check does not report a missing/extraneous package.
-		if (isWorkspaceSelfLink(originalLink) && !fs.existsSync(renamedLink)) {
-			fs.renameSync(originalLink, renamedLink)
-			didRenameLink = true
-		}
+	}
+	fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, "\t"))
+	didRewrite = true
+	// Keep bun's workspace self-link consistent with the temporary package name
+	// so vsce's dependency check does not report a missing/extraneous package.
+	if (name !== originalName && isWorkspaceSelfLink(originalLink) && !fs.existsSync(renamedLink)) {
+		fs.renameSync(originalLink, renamedLink)
+		didRenameLink = true
 	}
 	didSwapReadme = Boolean(swapInMarketplaceReadme())
 	fs.mkdirSync(outDir, { recursive: true })
@@ -89,9 +125,12 @@ try {
 		],
 		{ stdio: "inherit", cwd: projectRoot, env: { ...process.env, PATH: `${path.join(nodeModules, ".bin")}${path.delimiter}${process.env.PATH ?? ""}` } },
 	)
-	console.log(`\nPackaged ${displayName} (${name} ${version}) -> ${vsixPath}`)
+	// Only a build that packaged consumes a number.
+	fs.writeFileSync(buildNumberPath, `${buildNumber}\n`)
+	fs.appendFileSync(buildLogPath, `${new Date().toISOString()} ${version} ${commit}${dirty ? "+dirty" : ""} ${vsixPath}\n`)
+	console.log(`\nPackaged ${displayName} (${name} ${version}, commit ${commit}${dirty ? ", dirty tree" : ""}) -> ${vsixPath}`)
 } finally {
 	if (didSwapReadme) restoreMarketplaceReadme()
 	if (didRenameLink) fs.renameSync(renamedLink, originalLink)
-	if (didRename) fs.writeFileSync(packageJsonPath, originalPackageJson)
+	if (didRewrite) fs.writeFileSync(packageJsonPath, originalPackageJson)
 }
