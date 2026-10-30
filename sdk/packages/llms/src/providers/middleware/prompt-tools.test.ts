@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
 	buildPromptToolsSection,
 	createPromptToolsStream,
+	guessToolName,
+	MALFORMED_TOOL_NAME,
 	parseToolCallBlock,
 	promptToolsMiddleware,
 	renderToolResult,
@@ -278,10 +280,51 @@ describe("parseToolCallBlock", () => {
 		});
 	});
 
-	it("rejects malformed blocks", () => {
+	it("tolerates a stray closing brace, trailing fences, and a label before the object", () => {
+		// Seen live from GoodVision's auto route: one `}` too many after the arguments.
+		expect(
+			parseToolCallBlock(
+				'{"name":"search_codebase","arguments":{"queries":["const restaurants\\\\s*=","cuisine:\\\\s*\\"([^\\"]+)\\""]}}}',
+			),
+		).toEqual({
+			name: "search_codebase",
+			input: {
+				queries: ['const restaurants\\s*=', 'cuisine:\\s*"([^"]+)"'],
+			},
+		});
+		expect(parseToolCallBlock('{"name":"t","arguments":{"a":1}} }\n')).toEqual(
+			{ name: "t", input: { a: 1 } },
+		);
+		expect(parseToolCallBlock('json\n{"name":"t","arguments":{}}')).toEqual({
+			name: "t",
+			input: {},
+		});
+		expect(parseToolCallBlock('{"name":"t","arguments":{"s":"}}"}}}')).toEqual(
+			{ name: "t", input: { s: "}}" } },
+		);
+	});
+
+	it("rejects malformed blocks, including a truncated object and text after the object", () => {
 		expect(parseToolCallBlock("not json")).toBeUndefined();
 		expect(parseToolCallBlock('{"arguments": {}}')).toBeUndefined();
 		expect(parseToolCallBlock("[1,2]")).toBeUndefined();
+		// Never complete a cut-off object: the call would run with partial arguments.
+		expect(
+			parseToolCallBlock('{"name":"write_to_file","arguments":{"content":"abc'),
+		).toBeUndefined();
+		expect(
+			parseToolCallBlock('{"name":"t","arguments":{}} and then more'),
+		).toBeUndefined();
+	});
+});
+
+describe("guessToolName", () => {
+	it("reads the tool name out of a block that is otherwise unreadable", () => {
+		expect(guessToolName('{"name":"run_commands","arguments":{"commands":[')).toBe(
+			"run_commands",
+		);
+		expect(guessToolName('{"tool": "read_file", oops')).toBe("read_file");
+		expect(guessToolName("garbage")).toBeUndefined();
 	});
 });
 
@@ -322,8 +365,24 @@ describe("ToolCallTextParser", () => {
 		];
 		expect(events).toEqual([
 			{ type: "call", call: { name: "a", input: {} } },
-			{ type: "invalid", text: "<tool_call>garbage</tool_call>" },
+			{ type: "invalid", text: "<tool_call>garbage</tool_call>", body: "garbage" },
 			{ type: "call", call: { name: "b", input: { x: 1 } } },
+		]);
+	});
+
+	it("names the tool of a malformed block when it can", () => {
+		const parser = new ToolCallTextParser();
+		const body = '{"name":"run_commands","arguments":{"commands":[';
+		expect([
+			...parser.feed(`<tool_call>${body}</tool_call>`),
+			...parser.flush(),
+		]).toEqual([
+			{
+				type: "invalid",
+				text: `<tool_call>${body}</tool_call>`,
+				body,
+				name: "run_commands",
+			},
 		]);
 	});
 });
@@ -398,6 +457,37 @@ describe("createPromptToolsStream", () => {
 			(parts.at(-1) as Extract<LanguageModelV4StreamPart, { type: "finish" }>)
 				.finishReason.unified,
 		).toBe("stop");
+	});
+
+	it("turns a malformed block into a call with the raw body, so the runtime reports a parse error", async () => {
+		const body = '{"name":"run_commands","arguments":{"commands":[';
+		const parts = await collect(
+			createPromptToolsStream(
+				streamOf([
+					{ type: "text-start", id: "t1" },
+					{
+						type: "text-delta",
+						id: "t1",
+						delta: `Plan first.\n<tool_call>${body}</tool_call><tool_call>garbage</tool_call>`,
+					},
+					{ type: "text-end", id: "t1" },
+					finish("stop"),
+				]),
+			),
+		);
+		const calls = parts.filter(
+			(p): p is Extract<LanguageModelV4StreamPart, { type: "tool-call" }> =>
+				p.type === "tool-call",
+		);
+		expect(calls.map((c) => [c.toolName, c.input])).toEqual([
+			["run_commands", body],
+			[MALFORMED_TOOL_NAME, "garbage"],
+		]);
+		expect(textDeltas(parts)).toBe("Plan first.\n");
+		expect(
+			(parts.at(-1) as Extract<LanguageModelV4StreamPart, { type: "finish" }>)
+				.finishReason.unified,
+		).toBe("tool-calls");
 	});
 
 	it("emits two calls from one turn and reopens text between them", async () => {

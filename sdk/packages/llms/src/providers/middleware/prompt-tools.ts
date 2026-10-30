@@ -48,8 +48,17 @@ export interface ParsedTextToolCall {
 export type ToolCallTextEvent =
 	| { type: "text"; text: string }
 	| { type: "call"; call: ParsedTextToolCall }
-	/** A block that could not be parsed; surfaced as text so nothing is lost. */
-	| { type: "invalid"; text: string };
+	/**
+	 * A block that could not be parsed even leniently. `text` is the block as
+	 * written, `body` its inside, `name` the tool it names if that much is
+	 * legible. The stream emits it as a call with the raw body as input, so the
+	 * runtime answers with a parse error the model can correct instead of the
+	 * turn ending as if it were a final answer.
+	 */
+	| { type: "invalid"; text: string; body: string; name?: string };
+
+/** The tool name given to a malformed block that names none. */
+export const MALFORMED_TOOL_NAME = "malformed_tool_call";
 
 // ---------------------------------------------------------------------------
 // Prompt side
@@ -81,6 +90,7 @@ export function buildPromptToolsSection(
 		'- A reply that needs a tool MUST contain the tool_call block in that same reply. Announcing a call ("I will now read the file") without the block does nothing and ends your turn; write the block.',
 		"- Write one block per call, and several blocks to make several calls in one reply. Put the blocks at the end of the reply, after any explanation.",
 		'- "arguments" must be a JSON object that matches the tool\'s input schema exactly (required fields present, correct types). Escape newlines and quotes inside JSON strings.',
+		"- A block holds exactly one JSON object and nothing else. Check that its braces and brackets balance: a stray closing brace after the object is the most common mistake.",
 		"- Only a tool_call block runs a tool. Describing a call in prose does nothing.",
 		'- Never write tool results yourself. After your reply, each call\'s result arrives in the next user message as <tool_result name="…" id="…">…</tool_result>; wait for it before continuing.',
 		"",
@@ -292,16 +302,89 @@ function stripFences(text: string): string {
 		.trim();
 }
 
-/** Parse the JSON inside one tool_call block; tolerant of fences and `input`/`tool` spellings. */
-export function parseToolCallBlock(
-	body: string,
-): ParsedTextToolCall | undefined {
-	let parsed: unknown;
+/**
+ * Scan from the first `{` to its matching `}`, honouring strings, and return
+ * the object text with whatever follows it. An object the text never closes
+ * (a truncated reply) is not completed: running a call with cut-off arguments
+ * is worse than reporting it.
+ */
+function scanJsonObject(
+	text: string,
+): { object: string; rest: string } | undefined {
+	const start = text.indexOf("{");
+	if (start === -1) {
+		return undefined;
+	}
+	const closers: string[] = [];
+	let inString = false;
+	let escaped = false;
+	for (let index = start; index < text.length; index += 1) {
+		const char = text[index];
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+			} else if (char === "\\") {
+				escaped = true;
+			} else if (char === '"') {
+				inString = false;
+			}
+			continue;
+		}
+		if (char === '"') {
+			inString = true;
+		} else if (char === "{" || char === "[") {
+			closers.push(char === "{" ? "}" : "]");
+		} else if (char === "}" || char === "]") {
+			if (closers.pop() !== char) {
+				return undefined;
+			}
+			if (closers.length === 0) {
+				return { object: text.slice(start, index + 1), rest: text.slice(index + 1) };
+			}
+		}
+	}
+	return undefined;
+}
+
+/** What may follow the object inside a block without making it unreadable: whitespace, stray closers, fences. */
+const TRAILING_JUNK = /^[\s}\],;`]*$/;
+
+/**
+ * Parse the JSON of a block leniently: strict JSON first, else the first
+ * balanced object in the text, provided nothing but stray closing brackets
+ * follows it. Models slip in an extra `}` after a nested object often enough
+ * that refusing the call would end the turn over a single character.
+ */
+function parseBlockJson(body: string): unknown {
+	const text = stripFences(body);
 	try {
-		parsed = JSON.parse(stripFences(body));
+		return JSON.parse(text);
+	} catch {
+		// Fall through to the lenient scan.
+	}
+	const scanned = scanJsonObject(text);
+	if (!scanned || !TRAILING_JUNK.test(scanned.rest)) {
+		return undefined;
+	}
+	try {
+		return JSON.parse(scanned.object);
 	} catch {
 		return undefined;
 	}
+}
+
+/** The tool a malformed block names, when that much of it is legible. */
+export function guessToolName(body: string): string | undefined {
+	const match = /"(?:name|tool|function)"\s*:\s*"([^"\\]+)"/.exec(body);
+	const name = match?.[1]?.trim();
+	return name || undefined;
+}
+
+/** Parse the JSON inside one tool_call block; tolerant of fences, stray closers, and `input`/`tool` spellings. */
+export function parseToolCallBlock(
+	body: string,
+): ParsedTextToolCall | undefined {
+	const parsed = parseBlockJson(body);
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 		return undefined;
 	}
@@ -377,6 +460,8 @@ export class ToolCallTextParser {
 					: {
 							type: "invalid",
 							text: `${TOOL_CALL_OPEN}${body}${TOOL_CALL_CLOSE}`,
+							body,
+							...(guessToolName(body) ? { name: guessToolName(body) } : {}),
 						},
 			);
 		}
@@ -390,7 +475,14 @@ export class ToolCallTextParser {
 			events.push(
 				call
 					? { type: "call", call }
-					: { type: "invalid", text: `${TOOL_CALL_OPEN}${this.buffer}` },
+					: {
+							type: "invalid",
+							text: `${TOOL_CALL_OPEN}${this.buffer}`,
+							body: this.buffer,
+							...(guessToolName(this.buffer)
+								? { name: guessToolName(this.buffer) }
+								: {}),
+						},
 			);
 		} else if (this.buffer) {
 			events.push({ type: "text", text: this.buffer });
@@ -419,28 +511,28 @@ export function createPromptToolsStream(
 		events: ToolCallTextEvent[],
 		controller: TransformStreamDefaultController<LanguageModelV4StreamPart>,
 	) => {
+		const emitCall = (toolName: string, input: string) => {
+			if (textOpen !== undefined) {
+				controller.enqueue({ type: "text-end", id: textOpen });
+				textOpen = undefined;
+			}
+			const id = `call_${nanoid()}`;
+			calls += 1;
+			controller.enqueue({ type: "tool-input-start", id, toolName });
+			controller.enqueue({ type: "tool-input-delta", id, delta: input });
+			controller.enqueue({ type: "tool-input-end", id });
+			controller.enqueue({ type: "tool-call", toolCallId: id, toolName, input });
+		};
 		for (const event of events) {
 			if (event.type === "call") {
-				if (textOpen !== undefined) {
-					controller.enqueue({ type: "text-end", id: textOpen });
-					textOpen = undefined;
-				}
-				const id = `call_${nanoid()}`;
-				const input = stringifyInput(event.call.input);
-				calls += 1;
-				controller.enqueue({
-					type: "tool-input-start",
-					id,
-					toolName: event.call.name,
-				});
-				controller.enqueue({ type: "tool-input-delta", id, delta: input });
-				controller.enqueue({ type: "tool-input-end", id });
-				controller.enqueue({
-					type: "tool-call",
-					toolCallId: id,
-					toolName: event.call.name,
-					input,
-				});
+				emitCall(event.call.name, stringifyInput(event.call.input));
+				continue;
+			}
+			if (event.type === "invalid") {
+				// The model meant to call a tool. Hand the runtime the block as the
+				// call's (unparseable) input: it answers with a parse error the model
+				// can fix on its next turn, which beats ending the task here.
+				emitCall(event.name ?? MALFORMED_TOOL_NAME, event.body.trim());
 				continue;
 			}
 			if (!event.text) {
