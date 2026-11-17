@@ -6,7 +6,7 @@ import {
 } from "@cline/shared/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLI_DEFAULT_MAX_CONSECUTIVE_MISTAKES } from "../runtime/defaults";
-import { createProgram } from "./program";
+import { commanderToParsedArgs, createProgram } from "./program";
 
 /** Render an absolute path under `home` the way help text does: `~/...`. */
 function tildePath(absolutePath: string, home: string): string {
@@ -76,5 +76,25 @@ describe("root option help text", () => {
 		expect(() => program.parse(["--retries"], { from: "user" })).toThrow(
 			/argument missing/,
 		);
+	});
+});
+
+describe("--memory / --no-memory", () => {
+	it("leaves the global setting in charge when neither flag is given", () => {
+		const program = createProgram();
+		program.parse(["say hi"], { from: "user" });
+		expect(commanderToParsedArgs(program).memory).toBeUndefined();
+	});
+
+	it("parses the one-run overrides", () => {
+		const on = createProgram();
+		on.parse(["--memory", "say hi"], { from: "user" });
+		expect(commanderToParsedArgs(on).memory).toBe(true);
+
+		const off = createProgram();
+		off.parse(["--no-memory", "say hi"], { from: "user" });
+		const parsed = commanderToParsedArgs(off);
+		expect(parsed.memory).toBe(false);
+		expect(parsed.prompt).toBe("say hi");
 	});
 });

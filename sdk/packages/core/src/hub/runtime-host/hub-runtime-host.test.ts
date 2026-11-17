@@ -1109,10 +1109,10 @@ describe("HubRuntimeHost", () => {
 	});
 
 	it.each([
-		undefined,
-		0,
-		4,
-	])("round-trips projected usage with reasoning=%s and agent identity", async (reasoningTokenCount) => {
+		[undefined, undefined],
+		[0, undefined],
+		[4, "claude-sonnet-4-5-20250929"],
+	])("round-trips projected usage with reasoning=%s, responseModelId=%s and agent identity", async (reasoningTokenCount, responseModelId) => {
 		let onEvent: ((event: HubEventEnvelope) => void) | undefined;
 		subscribeMock.mockImplementation((listener) => {
 			onEvent = listener;
@@ -1181,6 +1181,7 @@ describe("HubRuntimeHost", () => {
 					totalCacheReadTokens: 3,
 					totalCacheWriteTokens: 3,
 					totalCost: 0.23,
+					...(responseModelId ? { responseModelId } : {}),
 				},
 			},
 		});
@@ -1209,6 +1210,7 @@ describe("HubRuntimeHost", () => {
 							totalCacheReadTokens: 3,
 							totalCacheWriteTokens: 3,
 							totalCost: 0.23,
+							...(responseModelId ? { responseModelId } : {}),
 						},
 					},
 				}),

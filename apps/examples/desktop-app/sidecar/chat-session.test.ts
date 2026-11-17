@@ -132,6 +132,15 @@ function localRuntimeContext(
 	};
 }
 
+function localRuntimeHooksOf(
+	mock: { mock: { calls: unknown[][] } },
+	pick: (input: Record<string, unknown>) => unknown = (input) => input,
+): Record<string, unknown> | undefined {
+	const input = mock.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+	const start = input ? (pick(input) as Record<string, unknown>) : undefined;
+	return (start?.localRuntime as { hooks?: Record<string, unknown> })?.hooks;
+}
+
 function localSessionManager(ctx: SidecarContext): Record<string, unknown> {
 	return ctx.runtimeBindings.get("local")?.sessionManager as unknown as Record<
 		string,
@@ -867,6 +876,8 @@ describe("session forks", () => {
 		expect(start).toHaveBeenCalledWith(
 			expect.objectContaining({ initialMessages: sourceMessages }),
 		);
+		// Forks get the Knowledge Vault hooks like every other start path.
+		expect(typeof localRuntimeHooksOf(start)?.afterRun).toBe("function");
 	});
 
 	it("rejects an edit fork while the source session is running", async () => {
@@ -1513,6 +1524,8 @@ describe("first-send connection updates", () => {
 		expect(start.mock.invocationCallOrder[0]).toBeLessThan(
 			send.mock.invocationCallOrder[0] ?? 0,
 		);
+		// The rebuilt runtime keeps the Knowledge Vault hooks.
+		expect(typeof localRuntimeHooksOf(start)?.beforeRun).toBe("function");
 	});
 
 	it("blocks a concurrent send throughout provider-switch preparation", async () => {
@@ -3167,8 +3180,20 @@ describe("mistake-limit prompt", () => {
 				).toBe("function");
 				// The SDK pauses the run on the decision itself; per-step hooks
 				// would round-trip to the sidecar on every model and tool call.
+				// Only the Knowledge Vault's once-per-run hooks are attached.
 				expect(input.config).not.toHaveProperty("hooks");
-				expect(input.localRuntime).not.toHaveProperty("hooks");
+				const hooks = input.localRuntime?.hooks as
+					| Record<string, unknown>
+					| undefined;
+				for (const name of [
+					"beforeTool",
+					"afterTool",
+					"afterModel",
+					"onEvent",
+				]) {
+					expect(hooks).not.toHaveProperty(name);
+				}
+				expect(typeof hooks?.beforeRun).toBe("function");
 				return {
 					sessionId: "session-limit",
 					manifest: { cwd: "/tmp/ws", workspace_root: "/tmp/ws" },

@@ -11,6 +11,7 @@ import { normalizeProviderId } from "@/lib/provider-id";
 
 const ALL_SETTINGS_SECTIONS = [
 	"General",
+	"Memory",
 	"Account",
 	"Local Models",
 	"Providers",

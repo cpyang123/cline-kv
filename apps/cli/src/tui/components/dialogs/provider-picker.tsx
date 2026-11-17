@@ -40,8 +40,13 @@ import {
 } from "../searchable-list";
 import {
 	buildClinePassSubscriptionPageUrl,
+	cycleProviderApiProtocol,
+	formatProviderApiProtocol,
+	normalizeProviderApiProtocol,
+	type ProviderApiProtocol,
 	resolveOAuthWaitKeyAction,
 	saveManualProviderApiKey,
+	supportsApiProtocolSetting,
 } from "./provider-picker-helpers";
 
 interface ProviderItem {
@@ -466,6 +471,11 @@ const FIELD_ORDER: ProviderConfigFieldKey[] = [
 	"sapDeploymentId",
 ];
 
+const API_PROTOCOL_FOCUS = "apiProtocol" as const;
+type ProviderConfigFocusKey =
+	| ProviderConfigFieldKey
+	| typeof API_PROTOCOL_FOCUS;
+
 export type ProviderConfigInputFields = Partial<
 	Record<ProviderConfigFieldKey, ProviderConfigFieldRequirement>
 >;
@@ -504,9 +514,18 @@ export function ProviderConfigInputContent(
 		() => FIELD_ORDER.filter((key) => config.fields[key] !== undefined),
 		[config],
 	);
+	const showApiProtocol = supportsApiProtocolSetting(providerId);
+	// Tab order: the text fields, then the API protocol choice.
+	const focusKeys = useMemo<ProviderConfigFocusKey[]>(
+		() => (showApiProtocol ? [...fieldKeys, API_PROTOCOL_FOCUS] : fieldKeys),
+		[fieldKeys, showApiProtocol],
+	);
 
 	const existingSettings =
 		providerSettingsManager.getProviderSettings(providerId);
+	const [apiProtocol, setApiProtocol] = useState<ProviderApiProtocol>(() =>
+		normalizeProviderApiProtocol(existingSettings?.protocol),
+	);
 	const [values, setValues] = useState<ProviderConfigValues>(() => {
 		const initial: ProviderConfigValues = {};
 		if (config.fields.baseUrl) {
@@ -551,8 +570,8 @@ export function ProviderConfigInputContent(
 		return initial;
 	});
 
-	const [focusedField, setFocusedField] = useState<ProviderConfigFieldKey>(
-		() => fieldKeys[0] ?? "apiKey",
+	const [focusedField, setFocusedField] = useState<ProviderConfigFocusKey>(
+		() => focusKeys[0] ?? "apiKey",
 	);
 
 	const submit = async () => {
@@ -583,6 +602,9 @@ export function ProviderConfigInputContent(
 					: undefined,
 				gcp: hasGcpFields ? resolveProviderConfigGcp(values) : undefined,
 				sap: hasSapFields ? resolveProviderConfigSap(values) : undefined,
+				// Present (even as undefined = Auto, which drops the key) only for
+				// the provider that reads it.
+				...(showApiProtocol ? { protocol: apiProtocol } : {}),
 			});
 			resolve(true);
 		} catch (error) {
@@ -599,12 +621,21 @@ export function ProviderConfigInputContent(
 			submit();
 			return;
 		}
-		if (key.name === "tab" && fieldKeys.length > 1) {
-			const idx = fieldKeys.indexOf(focusedField);
+		if (
+			focusedField === API_PROTOCOL_FOCUS &&
+			(key.name === "left" || key.name === "right" || key.name === "space")
+		) {
+			setApiProtocol((current) =>
+				cycleProviderApiProtocol(current, key.name === "left" ? -1 : 1),
+			);
+			return;
+		}
+		if (key.name === "tab" && focusKeys.length > 1) {
+			const idx = focusKeys.indexOf(focusedField);
 			const nextIdx = key.shift
-				? (idx - 1 + fieldKeys.length) % fieldKeys.length
-				: (idx + 1) % fieldKeys.length;
-			const next = fieldKeys[nextIdx];
+				? (idx - 1 + focusKeys.length) % focusKeys.length
+				: (idx + 1) % focusKeys.length;
+			const next = focusKeys[nextIdx];
 			if (next) setFocusedField(next);
 		}
 	}, dialogId);
@@ -651,11 +682,36 @@ export function ProviderConfigInputContent(
 				);
 			})}
 
+			{showApiProtocol && (
+				<box flexDirection="column">
+					<text fg="gray">API protocol</text>
+					<text fg="gray">
+						Auto tries the Responses API and falls back to Chat Completions.
+					</text>
+					<box
+						border
+						borderStyle="rounded"
+						borderColor={
+							focusedField === API_PROTOCOL_FOCUS ? palette.act : "gray"
+						}
+						paddingX={1}
+					>
+						<text
+							fg={focusedField === API_PROTOCOL_FOCUS ? palette.act : undefined}
+						>
+							{`‹ ${formatProviderApiProtocol(apiProtocol)} ›`}
+						</text>
+					</box>
+				</box>
+			)}
+
 			<text fg="gray">
 				<em>
-					{fieldKeys.length > 1
-						? "Tab to switch fields, Enter to save, Esc to go back"
-						: "Enter to save, Esc to go back"}
+					{focusedField === API_PROTOCOL_FOCUS
+						? "←/→ to change, Tab to switch fields, Enter to save, Esc to go back"
+						: focusKeys.length > 1
+							? "Tab to switch fields, Enter to save, Esc to go back"
+							: "Enter to save, Esc to go back"}
 				</em>
 			</text>
 		</box>

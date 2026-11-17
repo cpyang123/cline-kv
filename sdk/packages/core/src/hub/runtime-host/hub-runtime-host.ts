@@ -546,6 +546,10 @@ function usageEventFromPayload(payload: Record<string, unknown> | undefined): {
 			totalCacheReadTokens: usageMetric(totals, "cacheReadTokens"),
 			totalCacheWriteTokens: usageMetric(totals, "cacheWriteTokens"),
 			totalCost: finiteNumber(totals?.totalCost),
+			...(typeof payload?.responseModelId === "string" &&
+			payload.responseModelId.trim()
+				? { responseModelId: payload.responseModelId }
+				: {}),
 		},
 		teamAgentId:
 			typeof agent?.teamAgentId === "string" ? agent.teamAgentId : undefined,

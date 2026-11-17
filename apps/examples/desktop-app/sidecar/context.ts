@@ -443,6 +443,11 @@ function handleAgentEvent(
 					totalInputTokens: event.totalInputTokens,
 					totalOutputTokens: event.totalOutputTokens,
 					totalCost: event.totalCost,
+					// The model the provider reports having served the request
+					// (routers like GoodVision `auto` pick one per request).
+					...(event.responseModelId
+						? { responseModelId: event.responseModelId }
+						: {}),
 				}),
 			);
 			break;
@@ -1043,6 +1048,10 @@ export function handleHubLiveEvent(
 					totalInputTokens: totals.inputTokens,
 					totalOutputTokens: totals.outputTokens,
 					totalCost: totals.totalCost,
+					...(typeof event.payload?.responseModelId === "string" &&
+					event.payload.responseModelId.trim()
+						? { responseModelId: event.payload.responseModelId.trim() }
+						: {}),
 				}),
 			);
 			return;

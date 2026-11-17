@@ -97,6 +97,16 @@ describe("restore_checkpoint", () => {
 		});
 
 		expect(ctx.liveSessions.get(sessionId)?.messages).toEqual(restoredMessages);
+		// The restored session starts with the Knowledge Vault hooks too.
+		const binding = ctx.runtimeBindings.get("local") as unknown as {
+			sessionManager: { restore: { mock: { calls: unknown[][] } } };
+		};
+		const restoreInput = binding.sessionManager.restore.mock.calls[0]?.[0] as {
+			start?: { localRuntime?: { hooks?: Record<string, unknown> } };
+		};
+		expect(typeof restoreInput?.start?.localRuntime?.hooks?.beforeRun).toBe(
+			"function",
+		);
 
 		// The webview re-reads the transcript after a restore, and that read
 		// prefers the persisted file, so the discarded turns must be gone there

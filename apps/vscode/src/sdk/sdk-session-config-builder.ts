@@ -9,6 +9,8 @@ import {
 	buildKnowledgeVaultWriterHandler,
 	composeAgentHooks,
 	KnowledgeVaultStore,
+	knowledgeVaultEventToMessage,
+	knowledgeVaultLogger,
 } from "@/core/knowledge-vault"
 import type { StateManager } from "@/core/storage/StateManager"
 import { buildSessionConfig, type SessionConfigInput } from "./cline-session-factory"
@@ -49,7 +51,8 @@ export class SdkSessionConfigBuilder {
 				stateManager.getGlobalSettingsKey("knowledgeVaultWriteMode") ?? DEFAULT_KNOWLEDGE_VAULT_WRITE_MODE,
 			store: KnowledgeVaultStore.forWorkspace(input.workspaceRoot?.trim() || input.cwd),
 			createWriterHandler: () => buildKnowledgeVaultWriterHandler(stateManager),
-			emitHookMessage,
+			onEvent: (event) => emitHookMessage(knowledgeVaultEventToMessage(event)),
+			logger: knowledgeVaultLogger,
 		})
 		config.hooks = composeAgentHooks(fileHooks, vault.hooks)
 

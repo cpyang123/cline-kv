@@ -7,6 +7,13 @@ import {
 	resolveCredentialFailureAction,
 	resolveCredentialFailureHint,
 } from "./helpers";
+import {
+	applyKnowledgeVaultMarker,
+	carryLiveDetailsIntoHistory,
+	isServedByDifferentModel,
+	KNOWLEDGE_VAULT_MESSAGE_KIND,
+	readProviderNotice,
+} from "./live-markers";
 
 const CLOUD_CONFIG: ChatSessionConfig = {
 	executionTarget: "cloud",
@@ -311,5 +318,131 @@ describe("extractAssistantTurnDataFromRpcMessages", () => {
 			images: [],
 			media: [],
 		});
+	});
+});
+
+describe("live markers across canonical history", () => {
+	const user = (id: string, createdAt: number) => ({
+		id,
+		sessionId: "s",
+		role: "user" as const,
+		content: "Add a retry",
+		createdAt,
+	});
+
+	it("keeps memory and notice rows and the served model of an answer", () => {
+		const live = [
+			user("live-user", 1),
+			{
+				id: "memory-1",
+				sessionId: "s",
+				role: "status" as const,
+				content: "Recalled 1 note from memory",
+				createdAt: 2,
+				meta: {
+					messageKind: KNOWLEDGE_VAULT_MESSAGE_KIND,
+					knowledgeVault: {
+						ts: 1,
+						kind: "recall" as const,
+						status: "completed" as const,
+						count: 1,
+					},
+				},
+			},
+			{
+				id: "live-answer",
+				sessionId: "s",
+				role: "assistant" as const,
+				content: "Added the retry.",
+				createdAt: 3,
+				meta: { modelId: "auto", responseModelId: "gpt-5.4-mini" },
+			},
+			{
+				id: "transient",
+				sessionId: "s",
+				role: "status" as const,
+				content: "Session started: s",
+				createdAt: 4,
+			},
+		];
+		const history = [
+			user("canonical-user", 1),
+			{
+				id: "canonical-answer",
+				sessionId: "s",
+				role: "assistant" as const,
+				content: "Added the retry.",
+				createdAt: 3,
+				meta: { modelId: "auto" },
+			},
+		];
+
+		const merged = carryLiveDetailsIntoHistory(history, live);
+
+		expect(merged.map((message) => message.id)).toEqual([
+			"canonical-user",
+			"memory-1",
+			"canonical-answer",
+		]);
+		expect(merged[2]?.meta).toEqual({
+			modelId: "auto",
+			responseModelId: "gpt-5.4-mini",
+		});
+		expect(carryLiveDetailsIntoHistory(history, [user("u", 1)])).toBe(history);
+	});
+
+	it("updates a write marker in place by its timestamp", () => {
+		const running = applyKnowledgeVaultMarker(
+			[],
+			"s",
+			{ ts: 5, kind: "write", status: "running" },
+			10,
+		);
+		const done = applyKnowledgeVaultMarker(
+			running,
+			"s",
+			{ ts: 5, kind: "write", status: "failed", body: "boom\ntrace" },
+			20,
+		);
+		expect(done).toHaveLength(1);
+		expect(done[0]).toMatchObject({
+			id: running[0]?.id,
+			createdAt: 10,
+			content: "Note failed: boom",
+		});
+	});
+
+	it("compares served and selected models loosely", () => {
+		expect(isServedByDifferentModel("gpt-5.4-mini", "auto")).toBe(true);
+		expect(
+			isServedByDifferentModel(
+				"claude-sonnet-4.6",
+				"anthropic/claude-sonnet-4.6",
+			),
+		).toBe(false);
+		expect(isServedByDifferentModel("gpt-4o-2024-08-06", "gpt-4o")).toBe(false);
+		expect(isServedByDifferentModel(undefined, "gpt-4o")).toBe(false);
+		expect(isServedByDifferentModel("gpt-4o", undefined)).toBe(true);
+	});
+
+	it("reads only the three provider notice kinds", () => {
+		expect(
+			readProviderNotice(
+				JSON.stringify({
+					message: "Using Chat Completions",
+					metadata: { kind: "responses_unavailable", modelId: "gpt-x" },
+				}),
+			),
+		).toEqual({
+			kind: "responses_unavailable",
+			message: "Using Chat Completions",
+			modelId: "gpt-x",
+		});
+		expect(
+			readProviderNotice(
+				JSON.stringify({ message: "x", metadata: { kind: "plugin" } }),
+			),
+		).toBeUndefined();
+		expect(readProviderNotice("not json")).toBeUndefined();
 	});
 });

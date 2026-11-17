@@ -1,3 +1,14 @@
+import {
+	KNOWLEDGE_VAULT_TEMPLATE_LABELS,
+	KNOWLEDGE_VAULT_TEMPLATES,
+	KNOWLEDGE_VAULT_WRITE_MODE_LABELS,
+	KNOWLEDGE_VAULT_WRITE_MODES,
+	KNOWLEDGE_VAULT_WRITER_LABELS,
+	KNOWLEDGE_VAULT_WRITERS,
+	type KnowledgeVaultGlobalSettings,
+	type KnowledgeVaultOptionLabel,
+	setKnowledgeVaultSettingsGlobally,
+} from "@cline/core";
 import type {
 	InteractiveConfigData,
 	InteractiveConfigItem,
@@ -290,4 +301,102 @@ export function getPluginDiagnosticsLoadingText(
 		return "Loading plugin diagnostics...";
 	}
 	return undefined;
+}
+
+// =============================================================================
+// Memory (Knowledge Vault) rows
+// =============================================================================
+
+export const KNOWLEDGE_VAULT_SETTING_ROWS = [
+	{ id: "memory", label: "Enabled" },
+	{ id: "memory-template", label: "Note template" },
+	{ id: "memory-writer", label: "Note writer" },
+	{ id: "memory-write-mode", label: "Write mode" },
+] as const;
+
+export type KnowledgeVaultSettingRowId =
+	(typeof KNOWLEDGE_VAULT_SETTING_ROWS)[number]["id"];
+
+export function isKnowledgeVaultSettingRowId(
+	id: string,
+): id is KnowledgeVaultSettingRowId {
+	return KNOWLEDGE_VAULT_SETTING_ROWS.some((row) => row.id === id);
+}
+
+function nextInCycle<T>(values: readonly T[], current: T): T {
+	const index = values.indexOf(current);
+	return values[(index + 1) % values.length] ?? current;
+}
+
+/** The settings change selecting a memory row makes (toggle or next choice). */
+export function getNextKnowledgeVaultSetting(
+	id: KnowledgeVaultSettingRowId,
+	current: KnowledgeVaultGlobalSettings,
+): Partial<KnowledgeVaultGlobalSettings> {
+	switch (id) {
+		case "memory":
+			return { enabled: !current.enabled };
+		case "memory-template":
+			return {
+				template: nextInCycle(KNOWLEDGE_VAULT_TEMPLATES, current.template),
+			};
+		case "memory-writer":
+			return { writer: nextInCycle(KNOWLEDGE_VAULT_WRITERS, current.writer) };
+		case "memory-write-mode":
+			return {
+				writeMode: nextInCycle(KNOWLEDGE_VAULT_WRITE_MODES, current.writeMode),
+			};
+	}
+}
+
+/**
+ * Applies a memory row selection: persists the change to the global settings
+ * file (shared with the other Cline hosts) and returns the new settings.
+ */
+export function applyKnowledgeVaultSettingRow(
+	id: KnowledgeVaultSettingRowId,
+	current: KnowledgeVaultGlobalSettings,
+	persist: (
+		update: Partial<KnowledgeVaultGlobalSettings>,
+	) => unknown = setKnowledgeVaultSettingsGlobally,
+): KnowledgeVaultGlobalSettings {
+	const update = getNextKnowledgeVaultSetting(id, current);
+	persist(update);
+	return { ...current, ...update };
+}
+
+function knowledgeVaultOption(
+	id: KnowledgeVaultSettingRowId,
+	settings: KnowledgeVaultGlobalSettings,
+): KnowledgeVaultOptionLabel | undefined {
+	switch (id) {
+		case "memory":
+			return undefined;
+		case "memory-template":
+			return KNOWLEDGE_VAULT_TEMPLATE_LABELS[settings.template];
+		case "memory-writer":
+			return KNOWLEDGE_VAULT_WRITER_LABELS[settings.writer];
+		case "memory-write-mode":
+			return KNOWLEDGE_VAULT_WRITE_MODE_LABELS[settings.writeMode];
+	}
+}
+
+export function formatKnowledgeVaultSettingValue(
+	id: KnowledgeVaultSettingRowId,
+	settings: KnowledgeVaultGlobalSettings,
+): string {
+	if (id === "memory") {
+		return settings.enabled ? "● on" : "○ off";
+	}
+	return knowledgeVaultOption(id, settings)?.label ?? "";
+}
+
+export function describeKnowledgeVaultSetting(
+	id: KnowledgeVaultSettingRowId,
+	settings: KnowledgeVaultGlobalSettings,
+): string {
+	if (id === "memory") {
+		return "Recall this workspace's notes at the start of a task and write a note after a completed task that used tools. Applies from the next run.";
+	}
+	return knowledgeVaultOption(id, settings)?.description ?? "";
 }

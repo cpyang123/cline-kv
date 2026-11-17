@@ -2447,6 +2447,7 @@ describe("HubServerTransport boundaries", () => {
 					totalCacheReadTokens: 2,
 					totalCacheWriteTokens: 1,
 					totalCost: 0.12,
+					responseModelId: "gpt-5.4-mini-2026-03-01",
 				},
 			},
 		});
@@ -2474,6 +2475,7 @@ describe("HubServerTransport boundaries", () => {
 				},
 				usage,
 				aggregateUsage,
+				responseModelId: "gpt-5.4-mini-2026-03-01",
 				agent: {
 					kind: "teammate",
 					agentId: "agent-teammate-1",

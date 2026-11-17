@@ -27,6 +27,13 @@ import type {
 	ForkSessionResult,
 } from "../../utils/chat-commands";
 import { createRuntimeHooks } from "../../utils/hooks";
+import {
+	composeWithKnowledgeVault,
+	createCliKnowledgeVault,
+	createKnowledgeVaultWriteTracker,
+	KNOWLEDGE_VAULT_EXIT_WAIT_MS,
+	knowledgeVaultEventToNotice,
+} from "../../utils/knowledge-vault";
 import { setActiveCliSession } from "../../utils/output";
 import { formatPluginIssueWarnings } from "../../utils/plugin-issues";
 import { loadInteractiveResumeMessages } from "../../utils/resume";
@@ -112,8 +119,13 @@ export function createInteractiveSessionRuntime(input: {
 	onPendingPrompts: (event: PendingPromptSnapshot) => void;
 	onPendingPromptSubmitted: (event: PendingPromptSubmittedEvent) => void;
 	onActiveSessionChange?: () => void;
+	/** Called before cleanup waits for a pending Knowledge Vault note write. */
+	onKnowledgeVaultExitWait?: (pendingWrites: number) => void;
 }) {
 	let sessionManager: CliCore | undefined;
+	// One tracker for every session this runtime starts, so exit can wait for
+	// a note still being written for an earlier session.
+	const knowledgeVaultWrites = createKnowledgeVaultWriteTracker();
 	let sessionManagerPromise: Promise<CliCore> | undefined;
 	let runtimeHooks: RuntimeHooks | undefined;
 	let unsubscribeAgent = () => {};
@@ -224,8 +236,22 @@ export function createInteractiveSessionRuntime(input: {
 		if (!runtimeHooks) {
 			throw new Error("interactive runtime hooks are unavailable");
 		}
+		// Knowledge Vault per session start, so a session started after a
+		// workspace change reads and writes that workspace's vault.
+		const knowledgeVault = createCliKnowledgeVault({
+			getConfig: () => input.config,
+			workspaceRoot:
+				input.chatCommandState.workspaceRoot?.trim() ||
+				input.chatCommandState.cwd ||
+				input.config.cwd,
+			providerSettingsManager: input.providerSettingsManager,
+			onEvent: (event) =>
+				input.onAgentEvent(knowledgeVaultEventToNotice(event)),
+			logger: input.config.logger,
+			tracker: knowledgeVaultWrites,
+		});
 		const hooks = withInteractiveApprovalPolicyHook(
-			runtimeHooks.hooks,
+			composeWithKnowledgeVault(runtimeHooks.hooks, knowledgeVault),
 			input.resolveToolPolicy,
 		);
 		return buildInteractiveSessionConfig({
@@ -908,6 +934,13 @@ export function createInteractiveSessionRuntime(input: {
 				unsubscribePendingPrompts();
 			}
 			try {
+				const pendingNoteWrites = knowledgeVaultWrites.pending();
+				if (pendingNoteWrites > 0) {
+					input.onKnowledgeVaultExitWait?.(pendingNoteWrites);
+					await knowledgeVaultWrites
+						.waitAll(KNOWLEDGE_VAULT_EXIT_WAIT_MS)
+						.catch(() => true);
+				}
 				exitSummary = await getExitSummary();
 				// Mark hooks shut down before session disposal so late abort/stop
 				// emissions cannot dispatch over a closing hub transport.

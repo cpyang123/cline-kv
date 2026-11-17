@@ -2,6 +2,10 @@ import { useTerminalDimensions } from "@opentui/react";
 import type { ChoiceContext } from "@opentui-ui/dialog";
 import { useDialog } from "@opentui-ui/dialog/react";
 import { useCallback } from "react";
+import {
+	formatKnowledgeVaultSummaryLines,
+	loadKnowledgeVaultSummary,
+} from "../../utils/knowledge-vault";
 import type { SlashCommandRegistry } from "../commands/slash-command-registry";
 import { resolveSlashCommand } from "../commands/slash-command-registry";
 import { ForkConfirmContent } from "../components/dialogs/fork-confirm";
@@ -34,6 +38,8 @@ export function useLocalCommandActions(input: {
 	onFork: TuiProps["onFork"];
 	onUndo: () => Promise<void>;
 	onExit: TuiProps["onExit"];
+	/** Workspace whose Knowledge Vault `/memory` shows. */
+	getWorkspaceRoot: () => string;
 }) {
 	const dialog = useDialog();
 	const session = useSession();
@@ -57,6 +63,7 @@ export function useLocalCommandActions(input: {
 		onFork,
 		onUndo,
 		onExit,
+		getWorkspaceRoot,
 	} = input;
 
 	const openHistory = useCallback(async () => {
@@ -214,6 +221,22 @@ export function useLocalCommandActions(input: {
 		}
 	}, [canForkSession, dialog, onFork, refocusTextarea, session]);
 
+	const showMemory = useCallback(async () => {
+		try {
+			const summary = await loadKnowledgeVaultSummary(getWorkspaceRoot());
+			session.appendEntry({
+				kind: "status",
+				tone: "memory",
+				text: formatKnowledgeVaultSummaryLines(summary).join("\n"),
+			});
+		} catch (error) {
+			session.appendEntry({
+				kind: "error",
+				text: `Failed to read memory: ${error instanceof Error ? error.message : String(error)}`,
+			});
+		}
+	}, [getWorkspaceRoot, session]);
+
 	const handleSlashCommand = useCallback(
 		(command: string, invocation?: LocalSlashCommandInvocation) => {
 			const resolved = resolveSlashCommand(slashCommandRegistry, command);
@@ -236,6 +259,7 @@ export function useLocalCommandActions(input: {
 				clearConversation: onClearConversation,
 				openHelp,
 				openHistory,
+				showMemory,
 				exitCline: onExit,
 			});
 		},
@@ -254,6 +278,7 @@ export function useLocalCommandActions(input: {
 			runCompact,
 			runFork,
 			session.isRunning,
+			showMemory,
 			slashCommandRegistry,
 		],
 	);

@@ -33,6 +33,7 @@ import {
 	type MessageWithMetadata,
 } from "@cline/llms";
 import {
+	type AgentHooks,
 	buildClineSystemPrompt,
 	type ConsecutiveMistakeLimitContext,
 	type ConsecutiveMistakeLimitDecision,
@@ -61,6 +62,7 @@ import {
 	sendEvent,
 } from "./context";
 import { isCloudAgentsEnabled } from "./feature-flags";
+import { createDesktopKnowledgeVaultHooks } from "./knowledge-vault";
 import { readSessionManifest, sharedSessionDataDir } from "./paths";
 import { runPluginSlashCommand } from "./plugin-commands";
 import { derivePromptFromMessages } from "./session-data/common";
@@ -664,11 +666,82 @@ export function createDesktopMistakeRecovery(
 	};
 }
 
+export type DesktopSessionRuntimeOptions = {
+	/** The session id; lazily read, it is known only once start() returns. */
+	getSessionId: () => string;
+	/** SSH sessions: the workspace and its provider settings are remote. */
+	remote: boolean;
+};
+
+function readConfigWorkspaceRoot(config: JsonRecord): string | undefined {
+	for (const value of [
+		config.workspaceRoot,
+		config.workspace_root,
+		config.cwd,
+	]) {
+		if (typeof value === "string" && value.trim()) return value.trim();
+	}
+	return undefined;
+}
+
+/**
+ * The per-session callbacks every desktop start path attaches: the
+ * mistake-limit prompt and the Knowledge Vault hooks. Both run in this
+ * process; the Hub proxies them for the session it runs.
+ */
+function createDesktopSessionRuntime(
+	ctx: SidecarContext,
+	config: JsonRecord,
+	options: DesktopSessionRuntimeOptions,
+): {
+	mistakeRecovery: ReturnType<typeof createDesktopMistakeRecovery>;
+	hooks?: AgentHooks;
+} {
+	const hooks = createDesktopKnowledgeVaultHooks(ctx, {
+		getSessionId: options.getSessionId,
+		remote: options.remote,
+		// The SDK resolves the workspace of a pathless chat at start; the
+		// live projection records it.
+		getWorkspaceRoot: () => {
+			const live = ctx.liveSessions?.get(options.getSessionId());
+			return (
+				(live ? readConfigWorkspaceRoot(live.config) : undefined) ??
+				readConfigWorkspaceRoot(config)
+			);
+		},
+		// Model switches update the live config in place; the writer follows
+		// the session's current model and the stored credentials the Hub uses.
+		resolveConnection: async () => {
+			const live = ctx.liveSessions?.get(options.getSessionId())?.config;
+			const {
+				providerId = "",
+				modelId = "",
+				apiKey,
+				baseUrl,
+				headers,
+				providerConfig,
+			} = buildSessionConnectionUpdate(
+				await withRemoteProviderCredentials(live ?? config),
+			);
+			return { providerId, modelId, apiKey, baseUrl, headers, providerConfig };
+		},
+	});
+	return {
+		mistakeRecovery: createDesktopMistakeRecovery(ctx, options.getSessionId),
+		...(hooks ? { hooks } : {}),
+	};
+}
+
 function buildCoreSessionConfig(
 	config: JsonRecord,
-	telemetryUser?: SidecarContext["telemetryUser"],
-	mistakeRecovery?: ReturnType<typeof createDesktopMistakeRecovery>,
+	ctx: SidecarContext,
+	runtimeOptions: DesktopSessionRuntimeOptions,
 ): JsonRecord {
+	const { mistakeRecovery, hooks } = createDesktopSessionRuntime(
+		ctx,
+		config,
+		runtimeOptions,
+	);
 	const rawWorkspaceRoot = config.workspaceRoot ?? config.workspace_root;
 	const workspaceRoot =
 		typeof rawWorkspaceRoot === "string" ? rawWorkspaceRoot.trim() : "";
@@ -713,8 +786,9 @@ function buildCoreSessionConfig(
 		// runs and long desktop sessions overflow the context window.
 		compaction: { enabled: true },
 		sessions: config.sessions,
-		extensionContext: createDesktopExtensionContext(telemetryUser),
+		extensionContext: createDesktopExtensionContext(ctx.telemetryUser),
 		...mistakeRecovery,
+		...(hooks ? { hooks } : {}),
 	};
 }
 
@@ -1074,11 +1148,10 @@ async function handleStart(
 	// Resolved once start() returns; the mistake-limit prompt reads it lazily.
 	let startedSessionId = requestedSessionId;
 	const coreConfig: JsonRecord = {
-		...buildCoreSessionConfig(
-			config,
-			ctx.telemetryUser,
-			createDesktopMistakeRecovery(ctx, () => startedSessionId),
-		),
+		...buildCoreSessionConfig(config, ctx, {
+			getSessionId: () => startedSessionId,
+			remote: binding.kind === "ssh",
+		}),
 		systemPrompt,
 	};
 	// Note: do NOT pass `prompt` to manager.start() here. When a prompt is
@@ -1252,6 +1325,7 @@ async function startRebuiltSession(
 	systemPrompt: string,
 	messages: MessageWithMetadata[],
 	compactionState: SessionCompactionState | undefined,
+	remote: boolean,
 ): Promise<void> {
 	const projectedMessages = compactionState
 		? projectSessionCompactionState(compactionState, messages)
@@ -1264,8 +1338,8 @@ async function startRebuiltSession(
 					sessionId,
 					systemPrompt,
 				},
-				ctx.telemetryUser,
-				createDesktopMistakeRecovery(ctx, () => sessionId),
+				ctx,
+				{ getSessionId: () => sessionId, remote },
 			) as unknown as ClineCoreStartConfig,
 		),
 		source: SessionSource.DESKTOP,
@@ -1336,6 +1410,7 @@ async function rebuildSessionForProviderChange(
 			nextSystemPrompt,
 			messages,
 			compactionState,
+			binding.kind === "ssh",
 		);
 		replacementStarted = true;
 		// Reusing a session id preserves its existing manifest. Treat refreshing
@@ -1358,6 +1433,7 @@ async function rebuildSessionForProviderChange(
 				previousSystemPrompt,
 				messages,
 				compactionState,
+				binding.kind === "ssh",
 			);
 			await manager.updateSessionConnection(
 				sessionId,
@@ -1576,6 +1652,8 @@ async function recoverSessionAfterHubLoss(
 						systemPrompt,
 						readPersistedChatMessages(sessionId) ?? session.messages ?? [],
 						compactionState,
+						ctx.runtimeBindings.get(session.environmentId ?? "local")?.kind ===
+							"ssh",
 					);
 					if (!stillWanted()) {
 						// Undo a cancelled rebuild only while the projection still
@@ -2163,8 +2241,11 @@ async function handleForkUnlocked(
 					...forkConfig,
 					systemPrompt,
 				},
-				ctx.telemetryUser,
-				createDesktopMistakeRecovery(ctx, () => newSessionId),
+				ctx,
+				{
+					getSessionId: () => newSessionId,
+					remote: binding.kind === "ssh",
+				},
 			) as unknown as ClineCoreStartConfig,
 		),
 		source: SessionSource.DESKTOP,
@@ -2329,8 +2410,11 @@ async function handleRestoreCheckpoint(
 									? readExplicitSystemPrompt(config)
 									: await resolveSystemPrompt(config),
 						},
-						ctx.telemetryUser,
-						createDesktopMistakeRecovery(ctx, () => restoredSessionId),
+						ctx,
+						{
+							getSessionId: () => restoredSessionId,
+							remote: binding.kind === "ssh",
+						},
 					) as unknown as ClineCoreStartConfig,
 				),
 				source: SessionSource.DESKTOP,

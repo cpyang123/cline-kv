@@ -1,4 +1,4 @@
-import type { AgentEvent, TeamEvent } from "@cline/core";
+import type { AgentEvent, KnowledgeVaultEvent, TeamEvent } from "@cline/core";
 import {
 	formatCompactionDividerLabel,
 	parseCompactionNoticeMetadata,
@@ -6,6 +6,10 @@ import {
 import { formatCliErrorMessage } from "./cline-pass-errors";
 import { materializeGeneratedMedia } from "./generated-media";
 import { formatToolInput, formatToolOutput, truncate } from "./helpers";
+import {
+	formatKnowledgeVaultEvent,
+	parseKnowledgeVaultNoticeMetadata,
+} from "./knowledge-vault";
 import {
 	c,
 	emitJsonLine,
@@ -60,6 +64,79 @@ export function resolveNonCompactionStatusLabel(
 			return "context budget adjusted";
 	}
 	return event.message.trim() || undefined;
+}
+
+/**
+ * Provider notices (e.g. a protocol fallback) the user should notice: shown
+ * as warnings rather than plain status lines.
+ */
+export const PROVIDER_WARNING_NOTICE_KINDS: ReadonlySet<string> = new Set([
+	"responses_unavailable",
+	"reasoning_disabled_for_tools",
+	"reasoning_replay_dropped",
+]);
+
+export function isProviderWarningNotice(event: AgentEvent): boolean {
+	if (event.type !== "notice" || event.displayRole !== "status") {
+		return false;
+	}
+	const kind = event.metadata?.kind;
+	return typeof kind === "string" && PROVIDER_WARNING_NOTICE_KINDS.has(kind);
+}
+
+/**
+ * Announces the model that actually served a request when it differs from
+ * the requested one (e.g. a router's choice for `auto`), once per change.
+ */
+export function createServedModelTracker(): {
+	next(
+		responseModelId: string | undefined,
+		requestedModelId: string | undefined,
+	): string | undefined;
+	reset(): void;
+} {
+	let lastAnnounced: string | undefined;
+	return {
+		next(responseModelId, requestedModelId) {
+			const served = responseModelId?.trim();
+			if (!served || served === requestedModelId?.trim()) {
+				return undefined;
+			}
+			if (served === lastAnnounced) {
+				return undefined;
+			}
+			lastAnnounced = served;
+			return served;
+		},
+		reset() {
+			lastAnnounced = undefined;
+		},
+	};
+}
+
+const servedModelTracker = createServedModelTracker();
+
+/** Test hook: forget the last announced served model. */
+export function resetServedModelAnnouncements(): void {
+	servedModelTracker.reset();
+}
+
+/**
+ * Knowledge Vault report: `[memory] ...` in plain mode, a
+ * `{ type: "knowledge_vault", event }` line in JSON mode.
+ */
+export function handleKnowledgeVaultEvent(event: KnowledgeVaultEvent): void {
+	if (getCurrentOutputMode() === "json") {
+		emitJsonLine("stdout", { type: "knowledge_vault", event });
+		return;
+	}
+	const text = formatKnowledgeVaultEvent(event);
+	if (!text) {
+		return;
+	}
+	closeInlineStreamIfNeeded();
+	const color = event.status === "failed" ? c.yellow : c.dim;
+	write(`${color}[memory]${c.reset} ${text}\n`);
 }
 
 export function closeInlineStreamIfNeeded(): void {
@@ -236,13 +313,33 @@ export function handleEvent(event: AgentEvent, config: Config): void {
 			break;
 		case "notice":
 			if (event.displayRole === "status") {
+				const vaultEvent = parseKnowledgeVaultNoticeMetadata(event.metadata);
+				if (vaultEvent) {
+					handleKnowledgeVaultEvent(vaultEvent);
+					break;
+				}
 				closeInlineStreamIfNeeded();
 				const label = resolveStatusNoticeLabel(event);
 				if (label) {
-					write(`\n${c.dim}[status]${c.reset} ${label}\n`);
+					if (isProviderWarningNotice(event)) {
+						write(`\n${c.yellow}[warning]${c.reset} ${label}\n`);
+					} else {
+						write(`\n${c.dim}[status]${c.reset} ${label}\n`);
+					}
 				}
 			}
 			break;
+		case "usage": {
+			const served = servedModelTracker.next(
+				event.responseModelId,
+				config.modelId,
+			);
+			if (served) {
+				closeInlineStreamIfNeeded();
+				write(`${c.dim}[model]${c.reset} answered by ${served}\n`);
+			}
+			break;
+		}
 	}
 }
 

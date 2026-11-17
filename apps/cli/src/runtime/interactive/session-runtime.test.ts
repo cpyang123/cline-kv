@@ -52,6 +52,34 @@ vi.mock("../session-events", () => ({
 	subscribeToPendingPromptEvents: subscribeToPendingPromptEventsMock,
 }));
 
+const knowledgeVaultTrackerMock = vi.hoisted(() => ({
+	override: undefined as
+		| undefined
+		| {
+				track: () => void;
+				pending: () => number;
+				waitAll: (timeoutMs?: number) => Promise<boolean>;
+		  },
+}));
+
+vi.mock(
+	"../../utils/knowledge-vault",
+	async (
+		importActual: () => Promise<typeof import("../../utils/knowledge-vault")>,
+	) => {
+		const actual = await importActual();
+		return {
+			...actual,
+			createCliKnowledgeVault: vi.fn(actual.createCliKnowledgeVault),
+			createKnowledgeVaultWriteTracker: vi.fn(
+				() =>
+					knowledgeVaultTrackerMock.override ??
+					actual.createKnowledgeVaultWriteTracker(),
+			),
+		};
+	},
+);
+
 vi.mock("./compaction", () => ({
 	compactInteractiveMessages: compactInteractiveMessagesMock,
 }));
@@ -197,6 +225,7 @@ async function makeRuntime(
 		config?: Config;
 		resumeSessionId?: string;
 		resolveToolPolicy?: (toolName: string) => Config["toolPolicies"][string];
+		onKnowledgeVaultExitWait?: (pendingWrites: number) => void;
 	} = {},
 ) {
 	createCliCoreMock.mockResolvedValue(manager);
@@ -219,6 +248,7 @@ async function makeRuntime(
 		onTeamEvent: vi.fn(),
 		onPendingPrompts: vi.fn(),
 		onPendingPromptSubmitted: vi.fn(),
+		onKnowledgeVaultExitWait: options.onKnowledgeVaultExitWait,
 	});
 }
 
@@ -1037,5 +1067,75 @@ describe("createInteractiveSessionRuntime", () => {
 
 		expect(sendError).toBeInstanceOf(SessionNotFoundError);
 		expect(manager.dispose).toHaveBeenCalledWith("cli_interactive_shutdown");
+	});
+	it("composes the Knowledge Vault into fresh, restarted and resumed sessions", async () => {
+		const { createCliKnowledgeVault } = await import(
+			"../../utils/knowledge-vault"
+		);
+		vi.mocked(createCliKnowledgeVault).mockClear();
+		const manager = makeManager();
+		manager.get.mockResolvedValue(undefined);
+		const runtime = await makeRuntime(manager);
+
+		await runtime.ensureReady();
+		await runtime.restartWithCurrentMessages();
+
+		expect(manager.start).toHaveBeenCalledTimes(2);
+		for (const call of manager.start.mock.calls) {
+			const hooks = (call[0] as { config?: Config } | undefined)?.config?.hooks;
+			// File hooks are off here (as in yolo mode); the vault still runs.
+			expect(hooks?.beforeRun).toBeTypeOf("function");
+			expect(hooks?.afterRun).toBeTypeOf("function");
+		}
+		expect(createCliKnowledgeVault).toHaveBeenCalledTimes(2);
+		expect(createCliKnowledgeVault).toHaveBeenCalledWith(
+			expect.objectContaining({ workspaceRoot: "/tmp/project" }),
+		);
+		const trackers = vi
+			.mocked(createCliKnowledgeVault)
+			.mock.calls.map((call) => call[0].tracker);
+		expect(trackers[0]).toBeDefined();
+		expect(trackers[1]).toBe(trackers[0]);
+
+		const resumedManager = makeManager();
+		const resumed = await makeRuntime(resumedManager, {
+			resumeSessionId: "resumed-session",
+		});
+		await resumed.ensureReady();
+		const resumedHooks = (
+			resumedManager.start.mock.calls[0]?.[0] as { config?: Config }
+		).config?.hooks;
+		expect(resumedHooks?.beforeRun).toBeTypeOf("function");
+	});
+
+	it("waits for a pending note write before stopping the session on cleanup", async () => {
+		const order: string[] = [];
+		const waitAll = vi.fn(async () => {
+			order.push("wait");
+			return true;
+		});
+		knowledgeVaultTrackerMock.override = {
+			track: vi.fn(),
+			pending: () => 1,
+			waitAll,
+		};
+		try {
+			const manager = makeManager();
+			manager.get.mockResolvedValue(undefined);
+			manager.getAccumulatedUsage.mockResolvedValue(undefined);
+			manager.dispose.mockImplementation(async () => {
+				order.push("dispose");
+			});
+			const onKnowledgeVaultExitWait = vi.fn();
+			const runtime = await makeRuntime(manager, { onKnowledgeVaultExitWait });
+			await runtime.ensureReady();
+			await runtime.cleanup();
+
+			expect(onKnowledgeVaultExitWait).toHaveBeenCalledWith(1);
+			expect(waitAll).toHaveBeenCalledWith(60_000);
+			expect(order).toEqual(["wait", "dispose"]);
+		} finally {
+			knowledgeVaultTrackerMock.override = undefined;
+		}
 	});
 });

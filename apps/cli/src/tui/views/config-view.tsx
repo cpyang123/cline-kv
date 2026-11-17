@@ -1,4 +1,8 @@
-import { readGlobalSettings, setAutoUpdateEnabledGlobally } from "@cline/core";
+import {
+	readGlobalSettings,
+	readKnowledgeVaultSettingsGlobally,
+	setAutoUpdateEnabledGlobally,
+} from "@cline/core";
 import { useTerminalDimensions } from "@opentui/react";
 import type { ChoiceContext } from "@opentui-ui/dialog";
 import { useDialogKeyboard } from "@opentui-ui/dialog/react";
@@ -19,9 +23,12 @@ import { resolveModelDisplayName } from "../components/status-bar";
 import { useDialogPalette, useThemeController } from "../hooks/use-theme";
 import { type DialogPalette, getThemeDefinition } from "../themes";
 import {
+	applyKnowledgeVaultSettingRow,
 	type ConfigAction,
 	canDeleteConfigFooterRow,
 	canToggleConfigFooterRow,
+	describeKnowledgeVaultSetting,
+	formatKnowledgeVaultSettingValue,
 	getAdjacentConfigTab,
 	getConfigFooterText,
 	getConfigItemDisplayName,
@@ -30,7 +37,9 @@ import {
 	getConfigTabs,
 	getPluginDiagnosticsLoadingText,
 	isInlineConfigAction,
+	isKnowledgeVaultSettingRowId,
 	isToggleableConfigItem,
+	KNOWLEDGE_VAULT_SETTING_ROWS,
 	resolveActiveConfigItems,
 	resolveConfigItemDeleteAction,
 	resolveConfigItemSelectAction,
@@ -405,6 +414,9 @@ export function ConfigPanelContent(props: ConfigPanelProps) {
 		() => readGlobalSettings().autoUpdateEnabled,
 	);
 	const [verbose, setVerbose] = useState(config.verbose);
+	const [memorySettings, setMemorySettings] = useState(() =>
+		readKnowledgeVaultSettingsGlobally(),
+	);
 	const [compactionMode, setCompactionMode] = useState(
 		props.currentCompactionMode,
 	);
@@ -488,6 +500,11 @@ export function ConfigPanelContent(props: ConfigPanelProps) {
 			});
 			r.push({ kind: "toggle", id: "auto-update", label: "Auto update" });
 			r.push({ kind: "toggle", id: "verbose", label: "Verbose" });
+			r.push({ kind: "spacer" });
+			r.push({ kind: "head", label: "Memory (Knowledge Vault)" });
+			for (const row of KNOWLEDGE_VAULT_SETTING_ROWS) {
+				r.push({ kind: "toggle", id: row.id, label: row.label });
+			}
 		} else {
 			const activeItems = resolveActiveConfigItems(configData, activeTab);
 			const countHeading = getConfigTabCountHeading(
@@ -650,6 +667,14 @@ export function ConfigPanelContent(props: ConfigPanelProps) {
 					case "verbose":
 						config.verbose = !verbose;
 						setVerbose(!verbose);
+						break;
+					default:
+						if (isKnowledgeVaultSettingRowId(row.id)) {
+							const id = row.id;
+							setMemorySettings((current) =>
+								applyKnowledgeVaultSettingRow(id, current),
+							);
+						}
 						break;
 				}
 				break;
@@ -855,6 +880,16 @@ export function ConfigPanelContent(props: ConfigPanelProps) {
 						} else if (row.id === "compaction") {
 							value = formatCliCompactionMode(compactionMode);
 							valueColor = getCompactionModeColor(compactionMode, palette);
+						} else if (isKnowledgeVaultSettingRowId(row.id)) {
+							value = formatKnowledgeVaultSettingValue(row.id, memorySettings);
+							valueColor =
+								row.id === "memory"
+									? memorySettings.enabled
+										? palette.success
+										: "gray"
+									: memorySettings.enabled
+										? palette.act
+										: "gray";
 						} else {
 							value = verbose ? "● on" : "○ off";
 							valueColor = verbose ? palette.success : "gray";
@@ -934,6 +969,12 @@ export function ConfigPanelContent(props: ConfigPanelProps) {
 			)}
 
 			<text> </text>
+			{selectedRow?.kind === "toggle" &&
+				isKnowledgeVaultSettingRowId(selectedRow.id) && (
+					<text fg="gray">
+						{describeKnowledgeVaultSetting(selectedRow.id, memorySettings)}
+					</text>
+				)}
 			{toggleError && <text fg="red">{toggleError}</text>}
 			<text fg="gray">
 				<em>

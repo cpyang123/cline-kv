@@ -142,6 +142,10 @@ import {
 	resolveKeybindingsPath,
 	writeKeybindings,
 } from "./keybindings";
+import {
+	handleKnowledgeVaultCommand,
+	KNOWLEDGE_VAULT_COMMANDS,
+} from "./knowledge-vault";
 import { clearLegacyProviderCredentials } from "./legacy-provider-credentials";
 import {
 	handleLocalModelsCommand,
@@ -3395,6 +3399,9 @@ export async function handleCommand(
 	}
 
 	// ── Global settings ────────────────────────────────────────────────
+	if (KNOWLEDGE_VAULT_COMMANDS.has(command)) {
+		return await handleKnowledgeVaultCommand(ctx, command, args);
+	}
 	if (command === "get_global_settings") {
 		return readGlobalSettings();
 	}

@@ -3,10 +3,14 @@ import { dirname } from "node:path";
 import type { AgentEvent, TeamEvent } from "@cline/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	createServedModelTracker,
 	handleEvent,
+	handleKnowledgeVaultEvent,
 	handleTeamEvent,
+	resetServedModelAnnouncements,
 	resolveStatusNoticeLabel,
 } from "./events";
+import { knowledgeVaultEventToNotice } from "./knowledge-vault";
 import { setCurrentOutputMode } from "./output";
 import type { Config } from "./types";
 
@@ -344,5 +348,129 @@ describe("handleEvent text formatting", () => {
 		} as unknown as TeamEvent);
 
 		expect(output).toMatch(/Investigating.*\n.*\[team run\].*started.*\n$/s);
+	});
+});
+
+describe("provider notices, memory and served model", () => {
+	let output = "";
+	const stripAnsi = (text: string) =>
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escapes
+		text.replace(/\x1b\[[0-9;]*m/g, "");
+
+	beforeEach(() => {
+		output = "";
+		setCurrentOutputMode("text");
+		resetServedModelAnnouncements();
+		vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+			output += String(chunk);
+			return true;
+		});
+	});
+
+	it("prints provider notices as warnings and other notices as status", () => {
+		handleEvent(
+			{
+				type: "notice",
+				noticeType: "status",
+				displayRole: "status",
+				message: "The endpoint has no Responses API; using Chat Completions.",
+				metadata: { kind: "responses_unavailable", modelId: "m" },
+			} as AgentEvent,
+			{} as Config,
+		);
+		handleEvent(
+			{
+				type: "notice",
+				noticeType: "status",
+				displayRole: "status",
+				message: "plugin warning",
+			} as AgentEvent,
+			{} as Config,
+		);
+		const plain = stripAnsi(output);
+		expect(plain).toContain(
+			"[warning] The endpoint has no Responses API; using Chat Completions.",
+		);
+		expect(plain).toContain("[status] plugin warning");
+		expect(plain).not.toContain("[status] The endpoint");
+	});
+
+	it("prints memory events as [memory] lines and JSON objects", () => {
+		handleKnowledgeVaultEvent({
+			ts: 1,
+			kind: "recall",
+			status: "completed",
+			count: 2,
+		});
+		handleKnowledgeVaultEvent({ ts: 2, kind: "write", status: "running" });
+		handleKnowledgeVaultEvent({ ts: 2, kind: "write", status: "completed" });
+		handleKnowledgeVaultEvent({
+			ts: 3,
+			kind: "write",
+			status: "failed",
+			body: "401 Unauthorized",
+		});
+		expect(stripAnsi(output).split("\n").filter(Boolean)).toEqual([
+			"[memory] recalled 2 notes",
+			"[memory] saving note…",
+			"[memory] note saved",
+			"[memory] note failed: 401 Unauthorized",
+		]);
+
+		output = "";
+		setCurrentOutputMode("json");
+		handleKnowledgeVaultEvent({ ts: 4, kind: "write", status: "completed" });
+		expect(JSON.parse(output.trim())).toMatchObject({
+			type: "knowledge_vault",
+			event: { ts: 4, kind: "write", status: "completed" },
+		});
+		setCurrentOutputMode("text");
+	});
+
+	it("routes vault notices from the event stream to the memory line", () => {
+		handleEvent(
+			knowledgeVaultEventToNotice({
+				ts: 1,
+				kind: "recall",
+				status: "completed",
+				count: 1,
+			}) as AgentEvent,
+			{} as Config,
+		);
+		expect(stripAnsi(output)).toContain("[memory] recalled 1 note");
+		expect(stripAnsi(output)).not.toContain("[status]");
+	});
+
+	it("announces the served model once per change", () => {
+		const usage = (responseModelId?: string) =>
+			({
+				type: "usage",
+				inputTokens: 1,
+				outputTokens: 1,
+				totalInputTokens: 1,
+				totalOutputTokens: 1,
+				responseModelId,
+			}) as AgentEvent;
+		const config = { modelId: "auto" } as Config;
+		handleEvent(usage("gpt-5.4-mini"), config);
+		handleEvent(usage("gpt-5.4-mini"), config);
+		handleEvent(usage(undefined), config);
+		handleEvent(usage("claude-sonnet-4-5"), config);
+		handleEvent(usage("auto"), config);
+		expect(stripAnsi(output).split("\n").filter(Boolean)).toEqual([
+			"[model] answered by gpt-5.4-mini",
+			"[model] answered by claude-sonnet-4-5",
+		]);
+	});
+});
+
+describe("createServedModelTracker", () => {
+	it("ignores the requested model and repeats", () => {
+		const tracker = createServedModelTracker();
+		expect(tracker.next("x", "x")).toBeUndefined();
+		expect(tracker.next("y", "x")).toBe("y");
+		expect(tracker.next("y", "x")).toBeUndefined();
+		expect(tracker.next("z", "x")).toBe("z");
+		expect(tracker.next("y", "x")).toBe("y");
 	});
 });

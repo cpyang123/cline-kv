@@ -210,3 +210,30 @@ describe("desktop settings commands", () => {
 		);
 	});
 });
+
+describe("OpenAI Compatible API setting", () => {
+	it("saves the API select and clears it back to Auto", async () => {
+		const { ctx } = createContext();
+		const { ProviderSettingsManager } = await import("@cline/core");
+		await handleCommand(ctx, "save_provider_settings", {
+			provider: "openai-compatible",
+			api_key: "sk-test",
+			base_url: "https://llm.example/v1",
+			settings: { protocol: "openai-responses" },
+		});
+		expect(
+			new ProviderSettingsManager().getProviderSettings("openai-compatible"),
+		).toMatchObject({ protocol: "openai-responses" });
+
+		// The form's "Not set" option commits null: the key is removed (Auto).
+		await handleCommand(ctx, "save_provider_settings", {
+			provider: "openai-compatible",
+			settings: { protocol: null },
+		});
+		const cleared = new ProviderSettingsManager().getProviderSettings(
+			"openai-compatible",
+		);
+		expect(cleared).not.toHaveProperty("protocol");
+		expect(cleared).toMatchObject({ baseUrl: "https://llm.example/v1" });
+	});
+});

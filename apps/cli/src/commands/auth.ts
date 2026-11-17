@@ -4,6 +4,7 @@ import {
 	createOAuthClientCallbacks,
 	ensureCustomProvidersLoaded,
 	getProviderAuthHandler,
+	KNOWLEDGE_VAULT_GOODVISION_PROVIDER_ID,
 	loginAndSaveProviderOAuthCredentials,
 	type ProviderSettings,
 	type ProviderSettingsManager,
@@ -51,7 +52,41 @@ type AuthQuickSetupInput = {
 	modelid: string;
 	baseurl?: string;
 	azureApiVersion?: string;
+	apiProtocol?: string;
 };
+
+/** `--api-protocol` values: how the OpenAI-compatible provider talks to its endpoint. */
+export const AUTH_API_PROTOCOLS = ["auto", "chat", "responses"] as const;
+export type AuthApiProtocol = (typeof AUTH_API_PROTOCOLS)[number];
+
+/**
+ * The providers.json `protocol` for an `--api-protocol` value: `undefined`
+ * for auto (the key is removed), `null` for an unknown value.
+ */
+export function resolveAuthApiProtocol(
+	value: string,
+): "openai-chat" | "openai-responses" | undefined | null {
+	switch (value.trim().toLowerCase()) {
+		case "auto":
+			return undefined;
+		case "chat":
+		case "openai-chat":
+		case "chat-completions":
+			return "openai-chat";
+		case "responses":
+		case "openai-responses":
+			return "openai-responses";
+		default:
+			return null;
+	}
+}
+
+/** Providers whose base URL `--baseurl` may set. */
+const BASE_URL_EDITABLE_PROVIDERS: ReadonlySet<string> = new Set([
+	BUILT_IN_PROVIDER.OPENAI_COMPATIBLE,
+	BUILT_IN_PROVIDER.OPENAI_NATIVE,
+	KNOWLEDGE_VAULT_GOODVISION_PROVIDER_ID,
+]);
 
 type AuthCommandInput = {
 	providerSettingsManager: ProviderSettingsManager;
@@ -61,6 +96,7 @@ type AuthCommandInput = {
 	modelid?: string;
 	baseurl?: string;
 	azureApiVersion?: string;
+	apiProtocol?: string;
 };
 
 type ParsedAuthCommandArgs = {
@@ -69,6 +105,7 @@ type ParsedAuthCommandArgs = {
 	modelid?: string;
 	baseurl?: string;
 	azureApiVersion?: string;
+	apiProtocol?: string;
 	parseError?: string;
 };
 
@@ -89,7 +126,11 @@ export function createAuthCommand(): Command {
 		.option("-k, --apikey <key>", "API key")
 		.option("-m, --modelid <id>", "model id")
 		.option("-b, --baseurl <url>", "base URL")
-		.option("--azure-api-version <version>", "Azure API version");
+		.option("--azure-api-version <version>", "Azure API version")
+		.option(
+			"--api-protocol <protocol>",
+			"OpenAI-compatible API: auto, chat (Chat Completions) or responses",
+		);
 	return cmd;
 }
 
@@ -107,6 +148,7 @@ export function parseAuthCommandArgs(args: string[]): ParsedAuthCommandArgs {
 		modelid?: string;
 		baseurl?: string;
 		azureApiVersion?: string;
+		apiProtocol?: string;
 	}>();
 	const positionalProvider = cmd.args[0];
 	return {
@@ -115,6 +157,7 @@ export function parseAuthCommandArgs(args: string[]): ParsedAuthCommandArgs {
 		modelid: opts.modelid,
 		baseurl: opts.baseurl,
 		azureApiVersion: opts.azureApiVersion,
+		apiProtocol: opts.apiProtocol,
 	};
 }
 
@@ -149,10 +192,16 @@ async function ensureQuickSetupInputValid(
 	}
 	if (
 		input.baseurl?.trim() &&
-		normalizedProvider !== BUILT_IN_PROVIDER.OPENAI_COMPATIBLE &&
-		normalizedProvider !== BUILT_IN_PROVIDER.OPENAI_NATIVE
+		!BASE_URL_EDITABLE_PROVIDERS.has(normalizedProvider)
 	) {
-		return "base URL is only supported for OpenAI and OpenAI-compatible providers";
+		return "base URL is only supported for OpenAI, OpenAI-compatible and GoodVision providers";
+	}
+	const apiProtocolError = validateApiProtocolInput(
+		normalizedProvider,
+		input.apiProtocol,
+	);
+	if (apiProtocolError) {
+		return apiProtocolError;
 	}
 	if (
 		input.azureApiVersion?.trim() &&
@@ -163,6 +212,79 @@ async function ensureQuickSetupInputValid(
 	return undefined;
 }
 
+function validateApiProtocolInput(
+	providerId: string,
+	apiProtocol: string | undefined,
+): string | undefined {
+	if (apiProtocol === undefined) {
+		return undefined;
+	}
+	if (providerId !== BUILT_IN_PROVIDER.OPENAI_COMPATIBLE) {
+		return "API protocol is only supported for the OpenAI-compatible provider";
+	}
+	if (resolveAuthApiProtocol(apiProtocol) === null) {
+		return `invalid API protocol "${apiProtocol}" (expected ${AUTH_API_PROTOCOLS.join(", ")})`;
+	}
+	return undefined;
+}
+
+function applyApiProtocol(
+	settings: ProviderSettings,
+	apiProtocol: string | undefined,
+): void {
+	if (apiProtocol === undefined) {
+		return;
+	}
+	const protocol = resolveAuthApiProtocol(apiProtocol);
+	if (protocol) {
+		settings.protocol = protocol;
+	} else {
+		delete settings.protocol;
+	}
+}
+
+/**
+ * `cline auth openai-compatible --api-protocol <p>` without key/model flags:
+ * switch the protocol of the configured provider, keeping everything else.
+ */
+async function runApiProtocolUpdate(input: AuthCommandInput): Promise<number> {
+	const providerId = normalizeProviderId((input.explicitProvider ?? "").trim());
+	const validationError = validateApiProtocolInput(
+		providerId,
+		input.apiProtocol,
+	);
+	if (validationError) {
+		input.io.writeErr(validationError);
+		return 1;
+	}
+	const existing =
+		input.providerSettingsManager.getProviderSettings(providerId);
+	if (!existing) {
+		input.io.writeErr(
+			`provider "${providerId}" is not configured yet (use: auth --provider ${providerId} --apikey <key> --modelid <id> --api-protocol ${input.apiProtocol})`,
+		);
+		return 1;
+	}
+	const next: ProviderSettings = { ...existing };
+	applyApiProtocol(next, input.apiProtocol);
+	input.providerSettingsManager.saveProviderSettings(next);
+	input.io.writeln(
+		`${c.green}API protocol set:${c.reset} ${c.cyan}${providerId}${c.reset} (${formatApiProtocol(next.protocol)})`,
+	);
+	return 0;
+}
+
+function formatApiProtocol(protocol: ProviderSettings["protocol"]): string {
+	switch (protocol) {
+		case "openai-chat":
+			return "Chat Completions";
+		case "openai-responses":
+			return "Responses";
+		default:
+			return "auto";
+	}
+}
+
 function saveQuickAuthProviderSettings(input: {
 	providerSettingsManager: ProviderSettingsManager;
 	providerId: string;
@@ -170,6 +292,7 @@ function saveQuickAuthProviderSettings(input: {
 	modelid: string;
 	baseurl?: string;
 	azureApiVersion?: string;
+	apiProtocol?: string;
 }): void {
 	const existing = input.providerSettingsManager.getProviderSettings(
 		input.providerId,
@@ -191,6 +314,7 @@ function saveQuickAuthProviderSettings(input: {
 			apiVersion: input.azureApiVersion.trim(),
 		};
 	}
+	applyApiProtocol(nextSettings, input.apiProtocol);
 	input.providerSettingsManager.saveProviderSettings(nextSettings);
 }
 
@@ -287,6 +411,7 @@ async function runQuickAuthSetup(input: AuthCommandInput): Promise<number> {
 	const modelid = input.modelid?.trim() ?? "";
 	const baseurl = input.baseurl?.trim();
 	const azureApiVersion = input.azureApiVersion?.trim();
+	const apiProtocol = input.apiProtocol?.trim();
 	const validationError = await ensureQuickSetupInputValid(
 		{
 			provider: providerId,
@@ -294,6 +419,7 @@ async function runQuickAuthSetup(input: AuthCommandInput): Promise<number> {
 			modelid,
 			baseurl,
 			azureApiVersion,
+			apiProtocol,
 		},
 		input.providerSettingsManager,
 	);
@@ -308,6 +434,7 @@ async function runQuickAuthSetup(input: AuthCommandInput): Promise<number> {
 		modelid,
 		baseurl,
 		azureApiVersion,
+		apiProtocol,
 	});
 	input.io.writeln(
 		`${c.green}Provider configured:${c.reset} ${c.cyan}${providerId}${c.reset} (${modelid})`,
@@ -398,11 +525,21 @@ export async function runAuthCommand(input: AuthCommandInput): Promise<number> {
 	if (hasQuickSetupFlags) {
 		if (!input.explicitProvider?.trim()) {
 			input.io.writeErr(
-				"auth quick setup requires --provider <id> when using --apikey/--modelid/--baseurl/--azure-api-version",
+				"auth quick setup requires --provider <id> when using --apikey/--modelid/--baseurl/--azure-api-version/--api-protocol",
 			);
 			return 1;
 		}
 		return runQuickAuthSetup(input);
+	}
+
+	if (typeof input.apiProtocol === "string") {
+		if (!input.explicitProvider?.trim()) {
+			input.io.writeErr(
+				"auth --api-protocol requires --provider openai-compatible",
+			);
+			return 1;
+		}
+		return runApiProtocolUpdate(input);
 	}
 
 	if (input.explicitProvider?.trim()) {

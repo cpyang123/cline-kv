@@ -340,6 +340,15 @@ export function collapseCompletedWork(
 		}
 		flushSpan(index);
 		out.push(item);
+		// A memory recall row sits between the prompt and the run's work; the
+		// run still started with the prompt.
+		if (
+			item.type === "message" &&
+			item.message.role === "status" &&
+			item.message.meta?.messageKind === "knowledge_vault"
+		) {
+			continue;
+		}
 		runStartTimestamp =
 			item.type === "message" && item.message.role === "user"
 				? item.message.createdAt

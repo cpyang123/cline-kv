@@ -10,6 +10,7 @@ import {
 	readCompactionModeGlobally,
 	readCompactionStrategyGlobally,
 	readGlobalSettings,
+	readKnowledgeVaultSettingsGlobally,
 	readPlanActModeGlobally,
 	readToolAutoApproveGlobally,
 	readTuiThemeGlobally,
@@ -19,6 +20,7 @@ import {
 	setDisabledAgentPlugin,
 	setDisabledPlugin,
 	setDisabledTools,
+	setKnowledgeVaultSettingsGlobally,
 	setModelToolEnabledGlobally,
 	setPlanActModeGlobally,
 	setTelemetryOptOutGlobally,
@@ -359,6 +361,78 @@ describe("global-settings", () => {
 			// Blank values normalize to unset instead of persisting whitespace.
 			writeGlobalSettings({ tuiTheme: "  " });
 			expect(readTuiThemeGlobally()).toBeUndefined();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("normalizes the Knowledge Vault settings, dropping invalid values", () => {
+		expect(
+			GlobalSettingsSchema.parse({
+				knowledgeVaultEnabled: false,
+				knowledgeVaultTemplate: "fused",
+				knowledgeVaultWriter: "goodvision",
+				knowledgeVaultWriteMode: "inline",
+			}),
+		).toEqual({
+			autoUpdateEnabled: true,
+			telemetryOptOut: false,
+			knowledgeVaultEnabled: false,
+			knowledgeVaultTemplate: "fused",
+			knowledgeVaultWriter: "goodvision",
+			knowledgeVaultWriteMode: "inline",
+		});
+		expect(
+			GlobalSettingsSchema.parse({
+				knowledgeVaultEnabled: "yes",
+				knowledgeVaultTemplate: "v9",
+				knowledgeVaultWriter: "someone",
+				knowledgeVaultWriteMode: 3,
+			}),
+		).toEqual({ autoUpdateEnabled: true, telemetryOptOut: false });
+	});
+
+	it("reads and writes the Knowledge Vault settings globally", async () => {
+		const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
+		try {
+			const settingsPath = join(root, "global-settings.json");
+			process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+
+			expect(readKnowledgeVaultSettingsGlobally()).toEqual({
+				enabled: true,
+				template: "two-block",
+				writer: "task",
+				writeMode: "separate",
+			});
+
+			setTuiThemeGlobally("tokyo-night");
+			setKnowledgeVaultSettingsGlobally({
+				enabled: false,
+				writer: "goodvision",
+			});
+			setKnowledgeVaultSettingsGlobally({ writeMode: "inline" });
+			expect(readKnowledgeVaultSettingsGlobally()).toEqual({
+				enabled: false,
+				template: "two-block",
+				writer: "goodvision",
+				writeMode: "inline",
+			});
+			expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+				autoUpdateEnabled: true,
+				telemetryOptOut: false,
+				tuiTheme: "tokyo-night",
+				knowledgeVaultEnabled: false,
+				knowledgeVaultWriter: "goodvision",
+				knowledgeVaultWriteMode: "inline",
+			});
+
+			// Other settings writers keep the Knowledge Vault keys.
+			setTuiThemeGlobally("dracula");
+			expect(readGlobalSettings()).toMatchObject({
+				knowledgeVaultEnabled: false,
+				knowledgeVaultWriter: "goodvision",
+				knowledgeVaultWriteMode: "inline",
+			});
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

@@ -778,6 +778,8 @@ function App(props: TuiProps) {
 		onFork: props.onFork,
 		onUndo: openCheckpointRestore,
 		onExit: exitCline,
+		getWorkspaceRoot: () =>
+			props.config.workspaceRoot?.trim() || props.config.cwd,
 	});
 
 	const startupActionsRef = useRef({ openConfig, openHistory });

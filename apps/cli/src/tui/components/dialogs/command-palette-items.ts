@@ -12,6 +12,7 @@ export type CommandPaletteAction =
 	| "undo"
 	| "clear"
 	| "history"
+	| "memory"
 	| "help"
 	| "quit";
 
@@ -128,6 +129,13 @@ const ACTION_ITEMS: Array<{
 		shortcut: "Opt+H",
 		description: "Resume a previous session",
 		keywords: ["history", "resume", "sessions"],
+	},
+	{
+		action: "memory",
+		label: "Show Memory",
+		shortcut: "Opt+Y",
+		description: "List this workspace's Knowledge Vault notes",
+		keywords: ["memory", "knowledge vault", "notes", "recall"],
 	},
 	{
 		action: "help",

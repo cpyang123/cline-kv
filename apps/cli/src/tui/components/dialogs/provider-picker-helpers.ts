@@ -78,3 +78,53 @@ export function buildClinePassSubscriptionPageUrl(
 	url.searchParams.set("personal", "true");
 	return url.toString();
 }
+
+/** OpenAI-compatible API protocol as stored in providers.json (`undefined` = Auto). */
+export type ProviderApiProtocol =
+	| "openai-chat"
+	| "openai-responses"
+	| undefined;
+
+const API_PROTOCOL_OPTIONS: ReadonlyArray<{
+	value: ProviderApiProtocol;
+	label: string;
+}> = [
+	{ value: undefined, label: "Auto" },
+	{ value: "openai-chat", label: "Chat Completions" },
+	{ value: "openai-responses", label: "Responses API" },
+];
+
+/** Only the OpenAI-compatible provider reads the `protocol` setting. */
+export function supportsApiProtocolSetting(providerId: string): boolean {
+	return providerId === "openai-compatible";
+}
+
+export function normalizeProviderApiProtocol(
+	value: unknown,
+): ProviderApiProtocol {
+	return value === "openai-chat" || value === "openai-responses"
+		? value
+		: undefined;
+}
+
+export function cycleProviderApiProtocol(
+	current: ProviderApiProtocol,
+	direction: 1 | -1 = 1,
+): ProviderApiProtocol {
+	const index = API_PROTOCOL_OPTIONS.findIndex(
+		(option) => option.value === current,
+	);
+	const next =
+		(Math.max(0, index) + direction + API_PROTOCOL_OPTIONS.length) %
+		API_PROTOCOL_OPTIONS.length;
+	return API_PROTOCOL_OPTIONS[next]?.value;
+}
+
+export function formatProviderApiProtocol(
+	protocol: ProviderApiProtocol,
+): string {
+	return (
+		API_PROTOCOL_OPTIONS.find((option) => option.value === protocol)?.label ??
+		"Auto"
+	);
+}

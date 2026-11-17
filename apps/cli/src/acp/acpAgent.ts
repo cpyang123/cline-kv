@@ -39,6 +39,11 @@ import { createCliCore } from "../session/session";
 import { isClineOrgIndividualInferenceSubscriptionErrorMessage } from "../utils/cline-pass-errors";
 import { getCliBuildInfo } from "../utils/common";
 import { randomSessionId, resolveWorkspaceRoot } from "../utils/helpers";
+import {
+	createCliKnowledgeVault,
+	createKnowledgeVaultWriteTracker,
+	KNOWLEDGE_VAULT_EXIT_WAIT_MS,
+} from "../utils/knowledge-vault";
 import type { ResolvedCliReasoning } from "../utils/reasoning";
 import type { Config } from "../utils/types";
 import {
@@ -112,6 +117,8 @@ export class AcpAgent implements Agent {
 	private readonly providerSettingsManager = new ProviderSettingsManager();
 	private readonly defaultAutoApproveTools: boolean;
 	private readonly reasoning: ResolvedCliReasoning;
+	/** Note writes of every session, so shutdown can wait for them. */
+	private readonly knowledgeVaultWrites = createKnowledgeVaultWriteTracker();
 
 	/** Set after a successful `authenticate` call. */
 	private authResult?: AcpAuthResult;
@@ -592,6 +599,9 @@ export class AcpAgent implements Agent {
 	}
 
 	async shutdown(): Promise<void> {
+		await this.knowledgeVaultWrites
+			.waitAll(KNOWLEDGE_VAULT_EXIT_WAIT_MS)
+			.catch(() => true);
 		for (const session of this.sessions.values()) {
 			if (session.abortController) {
 				session.abortController.abort();
@@ -743,6 +753,17 @@ export class AcpAgent implements Agent {
 			},
 		);
 
+		// Knowledge Vault: recall on the first run, a note after completed runs
+		// that used tools. ACP has no notice channel, so events are only logged.
+		const knowledgeVault = createCliKnowledgeVault({
+			// The model can change in place (session/set_config_option).
+			getConfig: () => ({ ...config, modelId: session.currentModelId }),
+			workspaceRoot: config.workspaceRoot?.trim() || config.cwd,
+			providerSettingsManager: this.providerSettingsManager,
+			logger: config.logger,
+			tracker: this.knowledgeVaultWrites,
+		});
+
 		const started = await sessionManager.start({
 			source: SessionSource.CLI,
 			// Persist the core session under the ACP session id so that
@@ -750,6 +771,7 @@ export class AcpAgent implements Agent {
 			config: {
 				...config,
 				modelId: session.currentModelId,
+				hooks: knowledgeVault.hooks,
 				sessionId: acpSessionId,
 			},
 			interactive: true,

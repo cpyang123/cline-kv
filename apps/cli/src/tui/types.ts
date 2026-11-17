@@ -51,7 +51,14 @@ export type ChatEntry = (
 			};
 	  }
 	| { kind: "error"; text: string }
-	| { kind: "status"; text: string }
+	| {
+			kind: "status";
+			text: string;
+			/** `warning`: a provider notice or failed memory write; `memory`: a Knowledge Vault report. */
+			tone?: "warning" | "memory";
+			/** Knowledge Vault event ts: a write's running/final reports share one entry. */
+			memoryTs?: number;
+	  }
 	| {
 			kind: "compaction";
 			compactionMode: "auto" | "manual" | "inherited";

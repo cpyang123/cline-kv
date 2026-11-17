@@ -10,6 +10,18 @@ import {
 } from "@cline/shared";
 import { resolveGlobalSettingsPath } from "@cline/shared/storage";
 import { z } from "zod";
+import {
+	DEFAULT_KNOWLEDGE_VAULT_ENABLED,
+	DEFAULT_KNOWLEDGE_VAULT_TEMPLATE,
+	DEFAULT_KNOWLEDGE_VAULT_WRITE_MODE,
+	DEFAULT_KNOWLEDGE_VAULT_WRITER,
+	KNOWLEDGE_VAULT_TEMPLATES,
+	KNOWLEDGE_VAULT_WRITE_MODES,
+	KNOWLEDGE_VAULT_WRITERS,
+	type KnowledgeVaultTemplate,
+	type KnowledgeVaultWriteMode,
+	type KnowledgeVaultWriter,
+} from "../extensions/knowledge-vault/constants";
 import { captureTelemetryOptOut } from "./telemetry/core-events";
 
 type AgentExtension = NonNullable<AgentConfig["extensions"]>[number];
@@ -71,6 +83,19 @@ export const GlobalSettingsSchema = z
 		tools: ModelToolSettingsSchema,
 		disabledPlugins: GlobalSettingsStringListSchema.optional(),
 		disabledAgentPlugins: GlobalSettingsStringListSchema.optional(),
+		knowledgeVaultEnabled: z.boolean().optional().catch(undefined),
+		knowledgeVaultTemplate: z
+			.enum(KNOWLEDGE_VAULT_TEMPLATES)
+			.optional()
+			.catch(undefined),
+		knowledgeVaultWriter: z
+			.enum(KNOWLEDGE_VAULT_WRITERS)
+			.optional()
+			.catch(undefined),
+		knowledgeVaultWriteMode: z
+			.enum(KNOWLEDGE_VAULT_WRITE_MODES)
+			.optional()
+			.catch(undefined),
 	})
 	.strip()
 	.transform((settings) => {
@@ -86,6 +111,10 @@ export const GlobalSettingsSchema = z
 			tools?: ModelToolSettings;
 			disabledPlugins?: string[];
 			disabledAgentPlugins?: string[];
+			knowledgeVaultEnabled?: boolean;
+			knowledgeVaultTemplate?: KnowledgeVaultTemplate;
+			knowledgeVaultWriter?: KnowledgeVaultWriter;
+			knowledgeVaultWriteMode?: KnowledgeVaultWriteMode;
 		} = {
 			autoUpdateEnabled: settings.autoUpdateEnabled,
 			telemetryOptOut: settings.telemetryOptOut,
@@ -116,6 +145,18 @@ export const GlobalSettingsSchema = z
 		}
 		if (settings.disabledAgentPlugins?.length) {
 			normalized.disabledAgentPlugins = settings.disabledAgentPlugins;
+		}
+		if (settings.knowledgeVaultEnabled !== undefined) {
+			normalized.knowledgeVaultEnabled = settings.knowledgeVaultEnabled;
+		}
+		if (settings.knowledgeVaultTemplate) {
+			normalized.knowledgeVaultTemplate = settings.knowledgeVaultTemplate;
+		}
+		if (settings.knowledgeVaultWriter) {
+			normalized.knowledgeVaultWriter = settings.knowledgeVaultWriter;
+		}
+		if (settings.knowledgeVaultWriteMode) {
+			normalized.knowledgeVaultWriteMode = settings.knowledgeVaultWriteMode;
 		}
 		return normalized;
 	});
@@ -331,6 +372,42 @@ export function setTuiThemeGlobally(tuiTheme: string): void {
 
 export function setToolAutoApproveGlobally(toolAutoApprove: boolean): void {
 	writeGlobalSettings({ ...readGlobalSettings(), toolAutoApprove });
+}
+
+/** The Knowledge Vault settings with their defaults applied. */
+export interface KnowledgeVaultGlobalSettings {
+	enabled: boolean;
+	template: KnowledgeVaultTemplate;
+	writer: KnowledgeVaultWriter;
+	writeMode: KnowledgeVaultWriteMode;
+}
+
+export function readKnowledgeVaultSettingsGlobally(): KnowledgeVaultGlobalSettings {
+	const settings = readGlobalSettings();
+	return {
+		enabled: settings.knowledgeVaultEnabled ?? DEFAULT_KNOWLEDGE_VAULT_ENABLED,
+		template:
+			settings.knowledgeVaultTemplate ?? DEFAULT_KNOWLEDGE_VAULT_TEMPLATE,
+		writer: settings.knowledgeVaultWriter ?? DEFAULT_KNOWLEDGE_VAULT_WRITER,
+		writeMode:
+			settings.knowledgeVaultWriteMode ?? DEFAULT_KNOWLEDGE_VAULT_WRITE_MODE,
+	};
+}
+
+/** Persists the given Knowledge Vault settings, keeping the others. */
+export function setKnowledgeVaultSettingsGlobally(
+	update: Partial<KnowledgeVaultGlobalSettings>,
+): void {
+	const settings = readGlobalSettings();
+	writeGlobalSettings({
+		...settings,
+		...(update.enabled !== undefined
+			? { knowledgeVaultEnabled: update.enabled }
+			: {}),
+		...(update.template ? { knowledgeVaultTemplate: update.template } : {}),
+		...(update.writer ? { knowledgeVaultWriter: update.writer } : {}),
+		...(update.writeMode ? { knowledgeVaultWriteMode: update.writeMode } : {}),
+	});
 }
 
 export function resolveDisabledToolNames(

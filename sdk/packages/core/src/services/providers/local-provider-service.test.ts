@@ -2575,6 +2575,35 @@ describe("updateLocalProvider", () => {
 		expect(manager.getProviderSettings(builtin)).not.toHaveProperty("protocol");
 	});
 
+	it("treats a null protocol from a settings form as Auto (key absent)", async () => {
+		const builtin = LlmsModels.BUILT_IN_PROVIDER.OPENAI_COMPATIBLE;
+		manager.saveProviderSettings(
+			{
+				provider: builtin,
+				apiKey: "key",
+				baseUrl: "https://example.openai.azure.com/openai/v1",
+				model: "gpt-6-luna",
+			},
+			{ setLastUsed: false },
+		);
+		await saveLocalProviderSettings(manager, {
+			providerId: builtin,
+			protocol: "openai-responses",
+		});
+		expect(manager.getProviderSettings(builtin)?.protocol).toBe(
+			"openai-responses",
+		);
+
+		// The desktop's "Not set" option arrives as null.
+		await saveLocalProviderSettings(manager, {
+			providerId: builtin,
+			protocol: null,
+		} as unknown as Parameters<typeof saveLocalProviderSettings>[1]);
+		const settings = manager.getProviderSettings(builtin);
+		expect(settings).not.toHaveProperty("protocol");
+		expect(settings).toMatchObject({ apiKey: "key", model: "gpt-6-luna" });
+	});
+
 	it("updates provider settings and can clear optional fields", async () => {
 		await updateLocalProvider(manager, {
 			providerId: "editable-provider",

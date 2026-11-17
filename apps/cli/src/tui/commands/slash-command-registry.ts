@@ -24,6 +24,7 @@ export type LocalSlashCommandName =
 	| "undo"
 	| "clear"
 	| "history"
+	| "memory"
 	| "quit"
 	| "help";
 
@@ -105,6 +106,10 @@ const TUI_LOCAL_COMMANDS: Array<{
 		description: "View session history",
 	},
 	{
+		name: "memory",
+		description: "Show this workspace's memory notes (Knowledge Vault)",
+	},
+	{
 		name: "help",
 		description: "Show help",
 	},
@@ -128,6 +133,7 @@ const SYSTEM_COMMAND_ORDER = [
 	"clear",
 	"team",
 	"history",
+	"memory",
 	"help",
 	"quit",
 ] satisfies ReadonlyArray<LocalSlashCommandName | "team">;

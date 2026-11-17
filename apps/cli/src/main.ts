@@ -203,6 +203,10 @@ export async function runCli(): Promise<void> {
 		.option("-m, --modelid <id>", "Model ID")
 		.option("-b, --baseurl <url>", "Base URL")
 		.option("--azure-api-version <version>", "Azure API version")
+		.option(
+			"--api-protocol <protocol>",
+			"OpenAI-compatible API: auto, chat (Chat Completions) or responses",
+		)
 		.option("--config <dir>", "configuration directory")
 		.option("-c, --cwd <path>", "Working directory")
 		.option(
@@ -217,6 +221,7 @@ export async function runCli(): Promise<void> {
 				modelid?: string;
 				baseurl?: string;
 				azureApiVersion?: string;
+				apiProtocol?: string;
 				config?: string;
 				cwd?: string;
 				dataDir?: string;
@@ -248,6 +253,7 @@ export async function runCli(): Promise<void> {
 				modelid: opts.modelid,
 				baseurl: opts.baseurl,
 				azureApiVersion: opts.azureApiVersion,
+				apiProtocol: opts.apiProtocol,
 				io,
 			});
 		});
@@ -288,6 +294,40 @@ export async function runCli(): Promise<void> {
 			const realCmd = await createConfigRuntimeCommand();
 			realCmd.setOptionValue("json", cmd.opts().json);
 			await realCmd.parseAsync(cmd.args, { from: "user" });
+		});
+
+	const memoryCmd = program
+		.command("memory")
+		.description(
+			"Show the workspace's Knowledge Vault notes (memory recalled into new tasks)",
+		)
+		.option("--body", "Print the notes as they are recalled into a task")
+		.option("--clear", "Delete every note in the workspace's vault")
+		.option("--delete <id>", "Delete one note by id")
+		.option("-y, --yes", "Skip the --clear confirmation")
+		.option("-c, --cwd <path>", "Workspace directory (default: current)")
+		.option("--json", "Output as JSON")
+		.action(async () => {
+			const opts = memoryCmd.opts<{
+				body?: boolean;
+				clear?: boolean;
+				delete?: string;
+				yes?: boolean;
+				cwd?: string;
+				json?: boolean;
+			}>();
+			const { runMemoryCommand } = await import("./commands/memory");
+			ctx.exitCode = await runMemoryCommand({
+				workspaceRoot: resolveWorkspaceRoot(
+					opts.cwd ?? program.opts().cwd ?? process.cwd(),
+				),
+				io,
+				json: opts.json === true || program.opts().json === true,
+				body: opts.body === true,
+				clear: opts.clear === true,
+				deleteId: opts.delete,
+				yes: opts.yes === true,
+			});
 		});
 
 	const pluginCmd = program
@@ -1111,6 +1151,9 @@ export async function runCli(): Promise<void> {
 				logger: loggerAdapter.core,
 			},
 			teamName: !isYoloMode ? args.teamName?.trim() || undefined : undefined,
+			...(typeof args.memory === "boolean"
+				? { knowledgeVaultEnabled: args.memory }
+				: {}),
 		};
 		try {
 			// For OAuth providers, don't write the resolved key into apiKey;

@@ -74,6 +74,7 @@ import { HubPanel } from "./hub-panel";
 import { ImportContent } from "./import-view";
 import { KeybindingsContent } from "./keybindings-view";
 import { LocalModelsContent } from "./local-models-view";
+import { MemorySettingsContent } from "./memory-view";
 import { NotificationSettings } from "./notification-settings";
 import {
 	ProviderDetailContent,
@@ -666,6 +667,8 @@ export function SettingsView({
 			<AboutContent onOpenConnectors={() => onNavigateSection("Customize")} />
 		) : activeNav === "General" ? (
 			<GeneralSettingsContent />
+		) : activeNav === "Memory" ? (
+			<MemorySettingsContent />
 		) : activeNav === "Debug" ? (
 			<DebugContent onExportDiagnostics={onExportDiagnostics} />
 		) : (

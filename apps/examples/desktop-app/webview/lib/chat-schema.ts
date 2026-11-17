@@ -97,6 +97,26 @@ export const ChatMessageSchema = z.object({
 			providerId: z.string().optional(),
 			providerAuth: ProviderAuthInfoSchema.optional(),
 			modelId: z.string().optional(),
+			/**
+			 * The model the provider reports having served the answer, when
+			 * the usage event carried one (routers pick it per request).
+			 */
+			responseModelId: z.string().optional(),
+			/** Knowledge Vault marker (messageKind `knowledge_vault`). */
+			knowledgeVault: z
+				.object({
+					ts: z.number(),
+					kind: z.enum(["recall", "write"]),
+					status: z.enum(["running", "completed", "failed"]),
+					count: z.number().int().nonnegative().optional(),
+					mode: z.enum(["inline", "separate"]).optional(),
+					body: z.string().optional(),
+					provider: z.string().optional(),
+					model: z.string().optional(),
+				})
+				.optional(),
+			/** Provider notice kind (messageKind `provider_notice`). */
+			noticeKind: z.string().optional(),
 			userRunSpan: z.number().int().nonnegative().optional(),
 			/**
 			 * Files attached to a user message (resolved `@` mentions), relative

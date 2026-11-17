@@ -132,3 +132,169 @@ if (typeof runtime.OnboardingView !== "function") throw new Error("missing Onboa
 		expect(result.status).toBe(0);
 	});
 });
+
+describe("auth --api-protocol and --baseurl", () => {
+	async function makeManager() {
+		const { mkdtempSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { ProviderSettingsManager } = await import("@cline/core");
+		const dir = mkdtempSync(join(tmpdir(), "cli-auth-protocol-"));
+		return new ProviderSettingsManager({
+			filePath: join(dir, "providers.json"),
+		});
+	}
+
+	function makeIo() {
+		const lines: string[] = [];
+		const errors: string[] = [];
+		return {
+			lines,
+			errors,
+			io: {
+				writeln: (text?: string) => lines.push(text ?? ""),
+				writeErr: (text: string) => errors.push(text),
+			},
+		};
+	}
+
+	it("maps --api-protocol values to the providers.json protocol", async () => {
+		const { resolveAuthApiProtocol } = await import("./auth");
+		expect(resolveAuthApiProtocol("auto")).toBeUndefined();
+		expect(resolveAuthApiProtocol("chat")).toBe("openai-chat");
+		expect(resolveAuthApiProtocol("Responses")).toBe("openai-responses");
+		expect(resolveAuthApiProtocol("grpc")).toBeNull();
+		expect(
+			parseAuthCommandArgs([
+				"openai-compatible",
+				"--api-protocol",
+				"responses",
+			]),
+		).toMatchObject({
+			explicitProvider: "openai-compatible",
+			apiProtocol: "responses",
+		});
+	});
+
+	it("saves the protocol with quick setup and removes it for auto", async () => {
+		const { runAuthCommand } = await import("./auth");
+		const manager = await makeManager();
+		const { io, errors } = makeIo();
+
+		await expect(
+			runAuthCommand({
+				providerSettingsManager: manager,
+				io,
+				explicitProvider: "openai-compatible",
+				apikey: "sk-1",
+				modelid: "model-a",
+				baseurl: "https://llm.example.test/v1",
+				apiProtocol: "responses",
+			}),
+		).resolves.toBe(0);
+		expect(errors).toEqual([]);
+		expect(manager.getProviderSettings("openai-compatible")).toMatchObject({
+			apiKey: "sk-1",
+			model: "model-a",
+			baseUrl: "https://llm.example.test/v1",
+			protocol: "openai-responses",
+		});
+
+		// Protocol only: keeps the rest of the entry.
+		await expect(
+			runAuthCommand({
+				providerSettingsManager: manager,
+				io,
+				explicitProvider: "openai-compatible",
+				apiProtocol: "chat",
+			}),
+		).resolves.toBe(0);
+		expect(manager.getProviderSettings("openai-compatible")).toMatchObject({
+			apiKey: "sk-1",
+			protocol: "openai-chat",
+		});
+
+		await expect(
+			runAuthCommand({
+				providerSettingsManager: manager,
+				io,
+				explicitProvider: "openai-compatible",
+				apiProtocol: "auto",
+			}),
+		).resolves.toBe(0);
+		const saved = manager.getProviderSettings("openai-compatible");
+		expect(saved?.protocol).toBeUndefined();
+		expect(saved?.apiKey).toBe("sk-1");
+	});
+
+	it("rejects --api-protocol for other providers and unknown values", async () => {
+		const { runAuthCommand } = await import("./auth");
+		const manager = await makeManager();
+		const { io, errors } = makeIo();
+
+		await expect(
+			runAuthCommand({
+				providerSettingsManager: manager,
+				io,
+				explicitProvider: "anthropic",
+				apikey: "sk-1",
+				modelid: "claude",
+				apiProtocol: "chat",
+			}),
+		).resolves.toBe(1);
+		expect(errors.at(-1)).toContain("only supported for the OpenAI-compatible");
+
+		await expect(
+			runAuthCommand({
+				providerSettingsManager: manager,
+				io,
+				explicitProvider: "openai-compatible",
+				apiProtocol: "grpc",
+			}),
+		).resolves.toBe(1);
+		expect(errors.at(-1)).toContain('invalid API protocol "grpc"');
+
+		await expect(
+			runAuthCommand({
+				providerSettingsManager: manager,
+				io,
+				explicitProvider: "openai-compatible",
+				apiProtocol: "chat",
+			}),
+		).resolves.toBe(1);
+		expect(errors.at(-1)).toContain("not configured yet");
+	});
+
+	it("accepts --baseurl for GoodVision", async () => {
+		const { runAuthCommand } = await import("./auth");
+		const manager = await makeManager();
+		const { io, errors } = makeIo();
+
+		await expect(
+			runAuthCommand({
+				providerSettingsManager: manager,
+				io,
+				explicitProvider: "goodvision",
+				apikey: "gv-key",
+				modelid: "auto",
+				baseurl: "https://test.goodvision.example/v1",
+			}),
+		).resolves.toBe(0);
+		expect(errors).toEqual([]);
+		expect(manager.getProviderSettings("goodvision")).toMatchObject({
+			baseUrl: "https://test.goodvision.example/v1",
+		});
+
+		await expect(
+			runAuthCommand({
+				providerSettingsManager: manager,
+				io,
+				explicitProvider: "anthropic",
+				apikey: "k",
+				modelid: "m",
+				baseurl: "https://x.example",
+			}),
+		).resolves.toBe(1);
+		expect(errors.at(-1)).toContain("base URL is only supported");
+	});
+});

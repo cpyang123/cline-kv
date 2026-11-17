@@ -30,6 +30,11 @@ export interface Config extends Omit<CoreSessionConfig, "apiKey" | "mode"> {
 	mode: CliAgentMode;
 	defaultToolAutoApprove: boolean;
 	toolPolicies: Record<string, ToolPolicy>;
+	/**
+	 * One-run Knowledge Vault override from `--memory` / `--no-memory`;
+	 * undefined follows the global setting.
+	 */
+	knowledgeVaultEnabled?: boolean;
 }
 
 export interface ActiveCliSession {
@@ -98,4 +103,6 @@ export interface ParsedArgs {
 	teamName?: string;
 	defaultToolAutoApprove: boolean;
 	autoApproveOverride?: boolean;
+	/** `--memory` (true) / `--no-memory` (false): Knowledge Vault for this run only. */
+	memory?: boolean;
 }

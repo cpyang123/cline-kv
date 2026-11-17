@@ -7608,3 +7608,130 @@ describe("cloud snapshot replay", () => {
 		expect(users.map((m) => m.id)).toEqual(["canonical-first", secondId]);
 	});
 });
+
+describe("useChatSession live markers", () => {
+	async function startSession() {
+		invokeMock.mockImplementation(
+			async (command: string, args?: Record<string, unknown>) => {
+				if (command === "get_process_context") {
+					return { cwd: "/workspace/cline", workspaceRoot: "/workspace/cline" };
+				}
+				if (command === "chat_session_command") {
+					const request = args?.request as
+						| { action?: string; config?: { sessionId?: string } }
+						| undefined;
+					if (request?.action === "start") {
+						return { sessionId: request.config?.sessionId };
+					}
+					if (request?.action === "send") {
+						return { ok: true };
+					}
+				}
+				return [];
+			},
+		);
+		await act(async () => {
+			await current.sendPrompt("Add a retry");
+		});
+		const handler = handlerFor("chat_event");
+		let index = 100;
+		return (stream: string, chunk: unknown) =>
+			act(async () => {
+				index += 1;
+				handler({
+					sessionId: current.sessionId,
+					stream,
+					chunk: typeof chunk === "string" ? chunk : JSON.stringify(chunk),
+					ts: Date.now(),
+					index,
+				});
+			});
+	}
+
+	it("updates one memory row per Knowledge Vault marker", async () => {
+		const emit = await startSession();
+		await emit("chat_knowledge_vault", {
+			ts: 1,
+			kind: "recall",
+			status: "completed",
+			count: 3,
+			body: "notes",
+		});
+		await emit("chat_knowledge_vault", {
+			ts: 2,
+			kind: "write",
+			status: "running",
+		});
+		const rows = () =>
+			current.messages.filter(
+				(message) => message.meta?.messageKind === "knowledge_vault",
+			);
+		expect(rows().map((message) => message.content)).toEqual([
+			"Recalled 3 notes from memory",
+			"Saving note to memory…",
+		]);
+		const writeRowId = rows()[1]?.id;
+
+		await emit("chat_knowledge_vault", {
+			ts: 2,
+			kind: "write",
+			status: "completed",
+			body: "DID: added retry",
+			model: "gpt-test",
+		});
+		expect(rows()).toHaveLength(2);
+		expect(rows()[1]).toMatchObject({
+			id: writeRowId,
+			role: "status",
+			content: "Note saved to memory",
+			meta: {
+				knowledgeVault: { status: "completed", body: "DID: added retry" },
+			},
+		});
+	});
+
+	it("warns once per provider notice kind and model", async () => {
+		const emit = await startSession();
+		const notice = (kind: string, modelId: string) => ({
+			level: "info",
+			message: `${kind} for ${modelId}`,
+			noticeType: "status",
+			metadata: { kind, modelId, endpointHost: "llm.example" },
+		});
+		await emit("chat_core_log", notice("responses_unavailable", "gpt-x"));
+		await emit("chat_core_log", notice("responses_unavailable", "gpt-x"));
+		await emit(
+			"chat_core_log",
+			notice("reasoning_disabled_for_tools", "gpt-x"),
+		);
+		await emit("chat_core_log", notice("responses_unavailable", "gpt-y"));
+		// Other core logs with a metadata kind stay out of the transcript.
+		await emit("chat_core_log", notice("something_else", "gpt-x"));
+
+		const notices = current.messages.filter(
+			(message) => message.meta?.messageKind === "provider_notice",
+		);
+		expect(notices.map((message) => message.content)).toEqual([
+			"responses_unavailable for gpt-x",
+			"reasoning_disabled_for_tools for gpt-x",
+			"responses_unavailable for gpt-y",
+		]);
+		expect(notices[0]?.meta?.noticeKind).toBe("responses_unavailable");
+	});
+
+	it("records the served model on the answer it belongs to", async () => {
+		const emit = await startSession();
+		await emit("chat_text", "Added the retry.");
+		await emit("chat_usage", {
+			inputTokens: 10,
+			outputTokens: 2,
+			responseModelId: "gpt-5.4-mini",
+		});
+		const answer = current.messages.find(
+			(message) => message.role === "assistant",
+		);
+		expect(answer?.meta?.responseModelId).toBe("gpt-5.4-mini");
+		// The selected model is kept beside it for the comparison.
+		expect(answer?.meta?.modelId).toBe(current.config.model);
+	});
+});

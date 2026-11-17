@@ -101,8 +101,22 @@ vi.mock("../utils/approval", () => ({
 
 vi.mock("../utils/events", () => ({
 	handleEvent: vi.fn(),
+	handleKnowledgeVaultEvent: vi.fn(),
 	handleTeamEvent: vi.fn(),
 }));
+
+vi.mock(
+	"../utils/knowledge-vault",
+	async (
+		importActual: () => Promise<typeof import("../utils/knowledge-vault")>,
+	) => {
+		const actual = await importActual();
+		return {
+			...actual,
+			createCliKnowledgeVault: vi.fn(actual.createCliKnowledgeVault),
+		};
+	},
+);
 
 vi.mock("../utils/hooks", () => ({
 	createRuntimeHooks: hookMocks.createRuntimeHooks,
@@ -1287,6 +1301,112 @@ describe("runAgent", () => {
 				totalCost: 0,
 			}),
 			expect.any(Object),
+		);
+	});
+	function completedStart() {
+		return {
+			sessionId: "session-1",
+			manifestPath: "/tmp/manifest.json",
+			messagesPath: "/tmp/messages.json",
+			manifest: { session_id: "session-1" },
+			result: {
+				text: "ok",
+				usage: {
+					inputTokens: 1,
+					outputTokens: 1,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					totalCost: undefined,
+				},
+				messages: [],
+				toolCalls: [],
+				iterations: 1,
+				finishReason: "completed",
+				model: { id: "m", provider: "openrouter", info: {} },
+				startedAt: new Date("2026-03-22T00:00:00.000Z"),
+				endedAt: new Date("2026-03-22T00:00:01.000Z"),
+				durationMs: 1000,
+			},
+		};
+	}
+
+	const baseRunConfig = {
+		cwd: process.cwd(),
+		enableAgentTeams: false,
+		enableSpawnAgent: false,
+		enableTools: [],
+		execution: { maxConsecutiveMistakes: 3 },
+		logger: undefined,
+		modelId: "google/gemini-3-flash-preview",
+		outputMode: "text",
+		providerId: "openrouter",
+		systemPrompt: "system",
+		thinking: false,
+		toolPolicies: { "*": { autoApprove: true } },
+		verbose: false,
+		workspaceRoot: process.cwd(),
+	};
+
+	it("composes the Knowledge Vault into the session hooks in yolo mode", async () => {
+		sessionManagerMocks.start.mockResolvedValue(completedStart());
+		hookMocks.createRuntimeHooks.mockReturnValue({
+			hooks: undefined,
+			shutdown: vi.fn(async () => {}),
+		});
+		const { runAgent } = await import("./run-agent");
+		const { createCliKnowledgeVault } = await import(
+			"../utils/knowledge-vault"
+		);
+
+		await runAgent("test prompt", {
+			...baseRunConfig,
+			mode: "yolo",
+			knowledgeVaultEnabled: false,
+		} as never);
+
+		expect(createCliKnowledgeVault).toHaveBeenCalledWith(
+			expect.objectContaining({ workspaceRoot: process.cwd() }),
+		);
+		const startConfig = (
+			sessionManagerMocks.start.mock.calls[0]?.[0] as {
+				config: { hooks?: Record<string, unknown> };
+			}
+		).config;
+		expect(startConfig.hooks?.beforeRun).toBeTypeOf("function");
+		expect(startConfig.hooks?.afterRun).toBeTypeOf("function");
+	});
+
+	it("waits for a pending note write before disposing the session, bounded", async () => {
+		sessionManagerMocks.start.mockResolvedValue(completedStart());
+		const order: string[] = [];
+		sessionManagerMocks.dispose.mockImplementation(async () => {
+			order.push("dispose");
+		});
+		const { runAgent } = await import("./run-agent");
+		const { createCliKnowledgeVault } = await import(
+			"../utils/knowledge-vault"
+		);
+		const { handleKnowledgeVaultEvent } = await import("../utils/events");
+		const waitForWrites = vi.fn(async () => {
+			order.push("wait");
+			return false;
+		});
+		vi.mocked(createCliKnowledgeVault).mockReturnValueOnce({
+			hooks: {},
+			tracker: {
+				track: vi.fn(),
+				pending: () => 1,
+				waitAll: vi.fn(async () => false),
+			},
+			waitForWrites,
+		});
+
+		await runAgent("test prompt", { ...baseRunConfig, mode: "act" } as never);
+
+		expect(waitForWrites).toHaveBeenCalledWith(60_000);
+		expect(order).toEqual(["wait", "dispose"]);
+		expect(handleKnowledgeVaultEvent).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: "write", status: "failed" }),
 		);
 	});
 });

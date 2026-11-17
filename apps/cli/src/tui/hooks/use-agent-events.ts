@@ -6,7 +6,7 @@ import type {
 	PendingPromptSubmittedEvent,
 } from "../../runtime/session-events";
 import { formatCliErrorMessage } from "../../utils/cline-pass-errors";
-import { resolveNonCompactionStatusLabel } from "../../utils/events";
+import { createServedModelTracker } from "../../utils/events";
 import { materializeGeneratedMedia } from "../../utils/generated-media";
 import {
 	formatToolInput,
@@ -15,6 +15,10 @@ import {
 } from "../../utils/helpers";
 import type { ChatEntry, InlineStream, TuiProps } from "../types";
 import { parseCompactionNoticeMetadata } from "../utils/compaction-status";
+import {
+	formatServedModelStatusText,
+	resolveStatusNoticeEntry,
+} from "../utils/status-notice-entry";
 
 interface AgentEventDeps {
 	appendEntry: (entry: ChatEntry) => void;
@@ -36,6 +40,9 @@ interface AgentEventDeps {
 
 export function useAgentEventHandlers(deps: AgentEventDeps) {
 	const openCompactionEntryRef = useRef(false);
+	const servedModelTrackerRef = useRef(createServedModelTracker());
+	// Knowledge Vault writes whose "saving" entry is in the transcript.
+	const memoryWriteEntriesRef = useRef(new Set<number>());
 	const {
 		appendEntry,
 		updateLastEntry,
@@ -298,19 +305,43 @@ export function useAgentEventHandlers(deps: AgentEventDeps) {
 							}
 							break;
 						}
-						const label = resolveNonCompactionStatusLabel(event);
-						if (label) {
-							appendEntry({ kind: "status", text: label });
+						const entry = resolveStatusNoticeEntry(event);
+						if (!entry) break;
+						const memoryTs = entry.memoryTs;
+						if (memoryTs !== undefined) {
+							if (memoryWriteEntriesRef.current.has(memoryTs)) {
+								// A write's final report replaces its "saving" entry.
+								updateEntry((current) =>
+									current.kind === "status" && current.memoryTs === memoryTs
+										? entry
+										: current,
+								);
+								break;
+							}
+							memoryWriteEntriesRef.current.add(memoryTs);
 						}
+						appendEntry(entry);
 					}
 					break;
-				case "usage":
+				case "usage": {
 					addUsageDelta({
 						inputTokens: event.inputTokens,
 						outputTokens: event.outputTokens,
 						cost: event.cost,
 					});
+					const served = servedModelTrackerRef.current.next(
+						event.responseModelId,
+						modelId,
+					);
+					if (served) {
+						closeInlineStream();
+						appendEntry({
+							kind: "status",
+							text: formatServedModelStatusText(served),
+						});
+					}
 					break;
+				}
 			}
 		},
 		[

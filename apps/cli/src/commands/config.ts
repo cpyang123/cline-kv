@@ -7,10 +7,16 @@ import {
 	discoverPluginModulePaths,
 	getPluginDisplayName,
 	hasMcpSettingsFile,
+	KNOWLEDGE_VAULT_TEMPLATE_LABELS,
+	KNOWLEDGE_VAULT_WRITE_MODE_LABELS,
+	KNOWLEDGE_VAULT_WRITER_LABELS,
+	type KnowledgeVaultGlobalSettings,
 	listHookConfigFiles,
 	listPluginToolsWithDiagnostics,
 	type RuleConfig,
+	readKnowledgeVaultSettingsGlobally,
 	resolveDefaultMcpSettingsPath,
+	resolveKnowledgeVaultPath,
 	resolveMcpServerRegistrations,
 	resolvePluginConfigSearchPaths,
 	type SkillConfig,
@@ -454,6 +460,34 @@ async function runToolsConfigCommand(
 	return 0;
 }
 
+export function runMemoryConfigCommand(
+	cwd: string,
+	outputMode: CliOutputMode,
+	io: ConfigIo,
+	readSettings: () => KnowledgeVaultGlobalSettings = readKnowledgeVaultSettingsGlobally,
+): number {
+	const settings = readSettings();
+	const path = resolveKnowledgeVaultPath(cwd);
+	if (outputMode === "json") {
+		process.stdout.write(JSON.stringify({ ...settings, path }));
+		return 0;
+	}
+	io.writeln("Memory (Knowledge Vault):");
+	io.writeln(`  enabled     ${settings.enabled ? "on" : "off"}`);
+	io.writeln(
+		`  template    ${settings.template} (${KNOWLEDGE_VAULT_TEMPLATE_LABELS[settings.template].label})`,
+	);
+	io.writeln(
+		`  writer      ${settings.writer} (${KNOWLEDGE_VAULT_WRITER_LABELS[settings.writer].label})`,
+	);
+	io.writeln(
+		`  write mode  ${settings.writeMode} (${KNOWLEDGE_VAULT_WRITE_MODE_LABELS[settings.writeMode].label})`,
+	);
+	io.writeln(`  vault       ${path}`);
+	io.writeln("Change these in /settings; list notes with `cline memory`.");
+	return 0;
+}
+
 async function loadInteractiveConfigDataForCommand(
 	cwd: string,
 ): Promise<Awaited<ReturnType<typeof loadInteractiveConfigData>>> {
@@ -562,6 +596,13 @@ export function createConfigCommand(
 				case "mcp":
 					actionExitCode = await runMcpConfigCommand(getOutputMode(), io);
 					break;
+				case "memory":
+					actionExitCode = runMemoryConfigCommand(
+						getCwd(),
+						getOutputMode(),
+						io,
+					);
+					break;
 				case "tools":
 					actionExitCode = await runToolsConfigCommand(
 						getCwd(),
@@ -572,7 +613,7 @@ export function createConfigCommand(
 					break;
 				default:
 					io.writeErr(
-						`config requires one of: workflows, rules, skills, agents, plugins, hooks, mcp, tools (got "${target}")`,
+						`config requires one of: workflows, rules, skills, agents, plugins, hooks, mcp, tools, memory (got "${target}")`,
 					);
 					actionExitCode = 1;
 			}

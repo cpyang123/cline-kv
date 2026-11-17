@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { InteractiveConfigItem } from "../../tui/interactive-config";
 import {
+	applyKnowledgeVaultSettingRow,
 	canToggleConfigFooterRow,
+	describeKnowledgeVaultSetting,
+	formatKnowledgeVaultSettingValue,
 	getAdjacentConfigTab,
 	getConfigFooterText,
 	getConfigItemDisplayName,
@@ -9,7 +12,9 @@ import {
 	getConfigTabCountHeading,
 	isDeletableConfigItem,
 	isInlineConfigAction,
+	isKnowledgeVaultSettingRowId,
 	isToggleableConfigItem,
+	KNOWLEDGE_VAULT_SETTING_ROWS,
 	resolveConfigItemDeleteAction,
 	resolveConfigItemSelectAction,
 	resolveConfigItemToggleAction,
@@ -227,5 +232,83 @@ describe("config view helpers", () => {
 
 	it("returns item names without decoration", () => {
 		expect(getConfigItemDisplayName("review")).toBe("review");
+	});
+});
+
+describe("memory (Knowledge Vault) settings rows", () => {
+	const settings = {
+		enabled: true,
+		template: "two-block",
+		writer: "task",
+		writeMode: "separate",
+	} as const;
+
+	it("lists the memory rows", () => {
+		expect(KNOWLEDGE_VAULT_SETTING_ROWS.map((row) => row.id)).toEqual([
+			"memory",
+			"memory-template",
+			"memory-writer",
+			"memory-write-mode",
+		]);
+		expect(isKnowledgeVaultSettingRowId("memory-writer")).toBe(true);
+		expect(isKnowledgeVaultSettingRowId("verbose")).toBe(false);
+	});
+
+	it("shows the core labels as values", () => {
+		expect(formatKnowledgeVaultSettingValue("memory", settings)).toBe("● on");
+		expect(
+			formatKnowledgeVaultSettingValue("memory", {
+				...settings,
+				enabled: false,
+			}),
+		).toBe("○ off");
+		expect(formatKnowledgeVaultSettingValue("memory-template", settings)).toBe(
+			"Two-block note (v5, current)",
+		);
+		expect(formatKnowledgeVaultSettingValue("memory-writer", settings)).toBe(
+			"Task model",
+		);
+		expect(
+			formatKnowledgeVaultSettingValue("memory-write-mode", settings),
+		).toBe("Separate writer call (v5knote, current)");
+		expect(describeKnowledgeVaultSetting("memory-writer", settings)).toContain(
+			"The model the task ran on",
+		);
+	});
+
+	it("toggles and cycles, persisting each change", () => {
+		const persist = vi.fn();
+		const off = applyKnowledgeVaultSettingRow("memory", settings, persist);
+		expect(off.enabled).toBe(false);
+		expect(persist).toHaveBeenLastCalledWith({ enabled: false });
+
+		const fused = applyKnowledgeVaultSettingRow(
+			"memory-template",
+			settings,
+			persist,
+		);
+		expect(fused.template).toBe("fused");
+		expect(persist).toHaveBeenLastCalledWith({ template: "fused" });
+		expect(
+			applyKnowledgeVaultSettingRow("memory-template", fused, persist).template,
+		).toBe("two-block");
+
+		expect(
+			applyKnowledgeVaultSettingRow("memory-writer", settings, persist).writer,
+		).toBe("goodvision");
+		expect(
+			applyKnowledgeVaultSettingRow("memory-write-mode", settings, persist)
+				.writeMode,
+		).toBe("inline");
+		expect(persist).toHaveBeenLastCalledWith({ writeMode: "inline" });
+	});
+
+	it("persists to the global settings file by default", async () => {
+		const { readKnowledgeVaultSettingsGlobally } = await import("@cline/core");
+		const before = readKnowledgeVaultSettingsGlobally();
+		const next = applyKnowledgeVaultSettingRow("memory-writer", before);
+		expect(readKnowledgeVaultSettingsGlobally().writer).toBe(next.writer);
+		applyKnowledgeVaultSettingRow("memory-writer", next);
+		expect(readKnowledgeVaultSettingsGlobally().writer).toBe(before.writer);
 	});
 });

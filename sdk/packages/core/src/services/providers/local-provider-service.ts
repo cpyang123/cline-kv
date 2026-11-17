@@ -1383,7 +1383,12 @@ async function saveLocalProviderSettingsUnlocked(
 		"routingProviderId",
 		"capabilities",
 	] as const) {
-		if (Object.hasOwn(request, key)) next[key] = request[key];
+		if (!Object.hasOwn(request, key)) continue;
+		// Forms send null for a cleared field (the desktop's "Not set" select,
+		// e.g. `protocol` back to Auto): that means "unset", not a value.
+		const value: unknown = request[key];
+		if (value === null) delete next[key];
+		else next[key] = value;
 	}
 
 	// Merged object fields
@@ -1429,9 +1434,9 @@ async function saveLocalProviderSettingsUnlocked(
 					headers: (next.headers as Record<string, string> | undefined) ?? null,
 					defaultModelId:
 						typeof next.model === "string" ? next.model : undefined,
-					protocol: request.protocol,
-					client: request.client,
-					capabilities: request.capabilities,
+					protocol: request.protocol ?? undefined,
+					client: request.client ?? undefined,
+					capabilities: request.capabilities ?? undefined,
 				});
 			} catch (error) {
 				if (!(error instanceof ModelDiscoveryError)) throw error;

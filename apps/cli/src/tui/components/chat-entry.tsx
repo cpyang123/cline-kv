@@ -767,6 +767,14 @@ export function ChatEntryView(props: {
 			);
 
 		case "status":
+			if (entry.tone === "warning") {
+				return (
+					<box flexDirection="row">
+						<text fg="yellow" content="⚠ " />
+						<text fg="yellow" selectable content={entry.text} />
+					</box>
+				);
+			}
 			return (
 				<box flexDirection="row">
 					<text fg="gray" content="* " />

@@ -8,8 +8,11 @@
  * established (files, verify commands, repository facts, dead ends) instead of
  * rediscovering it.
  *
- * Types and constants here are shared by the extension host (hooks, settings)
- * and the webview (settings UI).
+ * The implementation lives in `@cline/core` (extensions/knowledge-vault). The
+ * settings enums, defaults and paths here mirror the core module's so the
+ * webview, which cannot import `@cline/core`, can use them; a parity test
+ * (src/core/knowledge-vault/adapter.test.ts) keeps the two in step. The labels
+ * are the extension's UI copy.
  */
 
 export const KNOWLEDGE_VAULT_TEMPLATES = ["fused", "two-block"] as const

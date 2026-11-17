@@ -189,6 +189,8 @@ const EDITABLE_BASE_URL_PROVIDER_IDS = new Set([
 	"lmstudio",
 	"litellm",
 	"openai-compatible",
+	// GoodVision SmartRouter: switch between its test and production hosts.
+	"goodvision",
 ]);
 
 function shouldExposeBaseUrlField(

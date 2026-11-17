@@ -31,6 +31,16 @@ import {
 	resolveCredentialFailureHint,
 } from "@/hooks/chat-session/helpers";
 import { canReplaceFailedTurn } from "@/hooks/chat-session/history-reconciliation";
+import {
+	applyKnowledgeVaultMarker,
+	applyResponseModelId,
+	carryLiveDetailsIntoHistory,
+	KNOWLEDGE_VAULT_STREAM,
+	makeProviderNoticeMessage,
+	parseKnowledgeVaultEvent,
+	providerNoticeKey,
+	readProviderNotice,
+} from "@/hooks/chat-session/live-markers";
 import type {
 	AgentChunkEvent,
 	AskQuestionRequestItem,
@@ -111,6 +121,7 @@ const RELEVANT_STREAMS = new Set([
 	"chat_core_log",
 	"chat_usage",
 	"chat_done",
+	KNOWLEDGE_VAULT_STREAM,
 ]);
 
 const BUSY_STATUSES = new Set<ChatSessionStatus>([
@@ -667,6 +678,10 @@ export function useChatSession(environmentId: string) {
 	const providerIdRef = useRef(config.provider);
 	const providerAuthRef = useRef(config.providerAuth);
 	const activeAssistantMessageIdRef = useRef<string | null>(null);
+	// The model the session was asked to use, for the "answered by" label.
+	const selectedModelIdRef = useRef<string>(config.model);
+	// Provider notices already shown, per session (`kind\0modelId`).
+	const shownProviderNoticesRef = useRef<Record<string, Set<string>>>({});
 	const lastStreamIndexBySessionRef = useRef<Record<string, number>>({});
 	const lastStreamBootBySessionRef = useRef<Record<string, string>>({});
 	const abortedRef = useRef(false);
@@ -734,6 +749,9 @@ export function useChatSession(environmentId: string) {
 	useEffect(() => {
 		activeAssistantMessageIdRef.current = activeAssistantMessageId;
 	}, [activeAssistantMessageId]);
+	useEffect(() => {
+		selectedModelIdRef.current = config.model;
+	}, [config.model]);
 	useEffect(() => {
 		messagesRef.current = messages;
 	}, [messages]);
@@ -999,7 +1017,7 @@ export function useChatSession(environmentId: string) {
 				// until canonical history contains this run's terminal error.
 				if (!canReplaceFailedTurn(sessionMessages, historyMessages))
 					return prev;
-				return historyMessages;
+				return carryLiveDetailsIntoHistory(historyMessages, sessionMessages);
 			});
 		},
 		[],
@@ -2029,6 +2047,25 @@ export function useChatSession(environmentId: string) {
 				if (pluginWarning) {
 					addMessage(makePluginIssueMessage(payload.sessionId, pluginWarning));
 				}
+				// Provider fallbacks (Responses → Chat Completions, reasoning
+				// off for tools) change how requests are sent: warn once per
+				// kind and model instead of on every request.
+				const providerNotice = readProviderNotice(payload.chunk);
+				if (providerNotice) {
+					const shown = (shownProviderNoticesRef.current[payload.sessionId] ??=
+						new Set());
+					const key = providerNoticeKey(providerNotice);
+					if (!shown.has(key)) {
+						shown.add(key);
+						addMessage(
+							makeProviderNoticeMessage(
+								payload.sessionId,
+								providerNotice,
+								chunkCreatedAt(),
+							),
+						);
+					}
+				}
 				// Remember the latest error so a failed turn can explain itself:
 				// the runtime reports the underlying cause (e.g. an auth failure)
 				// here rather than on the turn-completion event.
@@ -2069,6 +2106,22 @@ export function useChatSession(environmentId: string) {
 				return;
 			}
 
+			if (payload.stream === KNOWLEDGE_VAULT_STREAM) {
+				const marker = parseKnowledgeVaultEvent(payload.chunk);
+				if (!marker) return;
+				setMessages((prev) =>
+					sliceMessages(
+						applyKnowledgeVaultMarker(
+							prev,
+							listeningSessionId,
+							marker,
+							chunkCreatedAt(),
+						),
+					),
+				);
+				return;
+			}
+
 			if (payload.stream === "chat_usage") {
 				let usage: ChatUsageEvent;
 				try {
@@ -2084,6 +2137,20 @@ export function useChatSession(environmentId: string) {
 				}
 				if (typeof usage.cacheReadTokens === "number") {
 					setCacheReadTokens(usage.cacheReadTokens);
+				}
+				const responseModelId =
+					typeof usage.responseModelId === "string"
+						? usage.responseModelId.trim()
+						: "";
+				if (responseModelId) {
+					setMessages((prev) =>
+						applyResponseModelId(prev, {
+							sessionId: listeningSessionId,
+							assistantMessageId: activeAssistantMessageIdRef.current,
+							responseModelId,
+							selectedModelId: selectedModelIdRef.current,
+						}),
+					);
 				}
 				const cost = usage.cost;
 				if (typeof cost === "number") {

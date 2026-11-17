@@ -2,6 +2,7 @@ import {
 	type AgentEvent,
 	type AgentResult,
 	type ProviderSettings,
+	type ProviderSettingsManager,
 	prewarmFileIndex,
 	SessionSource,
 	type UserInstructionConfigService,
@@ -17,13 +18,22 @@ import {
 	submitAndExitInTerminal,
 } from "../utils/approval";
 import { formatCliErrorMessage } from "../utils/cline-pass-errors";
-import { handleEvent, handleTeamEvent } from "../utils/events";
+import {
+	handleEvent,
+	handleKnowledgeVaultEvent,
+	handleTeamEvent,
+} from "../utils/events";
 import {
 	shouldZeroClineFreeModelCost,
 	zeroCliAgentEventCost,
 	zeroCliUsageCost,
 } from "../utils/free-model-cost";
 import { createRuntimeHooks } from "../utils/hooks";
+import {
+	composeWithKnowledgeVault,
+	createCliKnowledgeVault,
+	KNOWLEDGE_VAULT_EXIT_WAIT_MS,
+} from "../utils/knowledge-vault";
 import {
 	c,
 	emitJsonLine,
@@ -140,6 +150,7 @@ export async function runAgent(
 	options?: {
 		clineApiBaseUrl?: string;
 		clineProviderSettings?: ProviderSettings;
+		providerSettingsManager?: ProviderSettingsManager;
 	},
 ): Promise<void> {
 	// A clean one-shot run should not inherit a stale nonzero process exit code
@@ -187,6 +198,21 @@ export async function runAgent(
 			await sessionManager.ingestHookEvent(payload);
 		},
 	});
+
+	// Knowledge Vault: recall the workspace's notes on the first run and write
+	// a note after a completed run that used tools. Composed even in yolo mode,
+	// where file hooks are off.
+	const knowledgeVault = createCliKnowledgeVault({
+		getConfig: () => config,
+		workspaceRoot: config.workspaceRoot?.trim() || config.cwd,
+		providerSettingsManager: options?.providerSettingsManager,
+		onEvent: handleKnowledgeVaultEvent,
+		logger: config.logger,
+	});
+	const sessionHooks = composeWithKnowledgeVault(
+		runtimeHooks.hooks,
+		knowledgeVault,
+	);
 
 	let reasoningChunkCount = 0;
 	let redactedReasoningChunkCount = 0;
@@ -293,7 +319,7 @@ export async function runAgent(
 						config.execution?.loopDetection ?? CLI_DEFAULT_LOOP_DETECTION,
 				},
 				checkpoint: config.checkpoint ?? CLI_DEFAULT_CHECKPOINT_CONFIG,
-				hooks: runtimeHooks.hooks,
+				hooks: sessionHooks,
 				onTeamEvent: handleTeamEvent,
 				onConsecutiveMistakeLimitReached: async (
 					context: ConsecutiveMistakeLimitContext,
@@ -427,6 +453,30 @@ export async function runAgent(
 		writeErr(message);
 		process.exitCode = 1;
 	} finally {
+		await waitForKnowledgeVaultWrites(knowledgeVault);
 		await cleanupRuntime();
+	}
+}
+
+/**
+ * A one-shot run exits when it returns, so give a detached note write the
+ * chance to land first, bounded so a stuck writer cannot hang the process.
+ */
+async function waitForKnowledgeVaultWrites(
+	knowledgeVault: ReturnType<typeof createCliKnowledgeVault>,
+): Promise<void> {
+	if (knowledgeVault.tracker.pending() === 0) {
+		return;
+	}
+	const settled = await knowledgeVault
+		.waitForWrites(KNOWLEDGE_VAULT_EXIT_WAIT_MS)
+		.catch(() => true);
+	if (!settled) {
+		handleKnowledgeVaultEvent({
+			ts: Date.now(),
+			kind: "write",
+			status: "failed",
+			body: `timed out after ${Math.round(KNOWLEDGE_VAULT_EXIT_WAIT_MS / 1000)}s; exiting without the note`,
+		});
 	}
 }

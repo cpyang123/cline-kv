@@ -128,6 +128,19 @@ export function createShellExecutor() {
 	return async () => ""
 }
 
+export { composeAgentHooks } from "../../../../sdk/packages/core/src/extensions/knowledge-vault/compose"
+export * from "../../../../sdk/packages/core/src/extensions/knowledge-vault/constants"
+export { buildKnowledgeVaultHooks } from "../../../../sdk/packages/core/src/extensions/knowledge-vault/hooks"
+export {
+	KnowledgeVaultStore,
+	noteLabel as knowledgeVaultNoteLabel,
+	renderVaultBody as renderKnowledgeVaultBody,
+	resolveKnowledgeVaultPath,
+} from "../../../../sdk/packages/core/src/extensions/knowledge-vault/store"
+export {
+	knowledgeVaultWriterRequestOptions,
+	resolveGoodVisionWriterModelId,
+} from "../../../../sdk/packages/core/src/extensions/knowledge-vault/writer-options"
 export { augmentMcpTimeoutError } from "../../../../sdk/packages/core/src/extensions/mcp/timeout"
 // The real createShellTool, so tests exercise the actual description
 // building and shell classification (getShellKind) rather than a stub that

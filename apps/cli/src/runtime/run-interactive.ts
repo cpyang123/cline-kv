@@ -37,6 +37,7 @@ import {
 	zeroCliUsageCost,
 } from "../utils/free-model-cost";
 import {
+	c,
 	prepareTerminalForPostTuiOutput,
 	writeErr,
 	writeln,
@@ -278,6 +279,7 @@ export async function runInteractive(
 	});
 	const providerSettingsManager = new ProviderSettingsManager();
 	let zeroCurrentTurnCost = false;
+	let tuiExited = false;
 
 	const sessionRuntime = createInteractiveSessionRuntime({
 		config,
@@ -304,6 +306,12 @@ export async function runInteractive(
 		},
 		onActiveSessionChange: () => {
 			for (const listener of activeSessionListeners) listener();
+		},
+		onKnowledgeVaultExitWait: () => {
+			// Only once the TUI is gone: printing under a live renderer garbles it.
+			if (!tuiExited) return;
+			prepareTerminalForPostTuiOutput();
+			writeln(`${c.dim}[memory] saving note before exit…${c.reset}`);
 		},
 	});
 	const configDataLoader = createInteractiveConfigDataLoader({
@@ -865,6 +873,7 @@ export async function runInteractive(
 	try {
 		await tuiApp.waitUntilExit();
 	} finally {
+		tuiExited = true;
 		exitSummary = await cleanupRuntime();
 	}
 	if (exitSummary) {

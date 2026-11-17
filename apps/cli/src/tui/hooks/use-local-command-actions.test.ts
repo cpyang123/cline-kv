@@ -22,12 +22,24 @@ function makeActions(
 		clearConversation: vi.fn(async () => {}),
 		openHelp: vi.fn(),
 		openHistory: vi.fn(),
+		showMemory: vi.fn(),
 		exitCline: vi.fn(),
 		...overrides,
 	};
 }
 
 describe("runLocalSlashCommandAction", () => {
+	it("shows the workspace memory with /memory", async () => {
+		const showMemory = vi.fn(async () => {});
+		const handled = runLocalSlashCommandAction({
+			name: "memory",
+			...makeActions({ showMemory }),
+		});
+
+		await expect(handled).resolves.toBe(true);
+		expect(showMemory).toHaveBeenCalledTimes(1);
+	});
+
 	it("opens the skills picker with skills", () => {
 		const openSkills = vi.fn();
 		const actions = makeActions({ openSkills });

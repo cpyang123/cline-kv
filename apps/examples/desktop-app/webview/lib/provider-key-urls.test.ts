@@ -21,6 +21,9 @@ describe("getProviderApiKeyUrl", () => {
 		expect(getProviderApiKeyUrl({ id: "OpenRouter" })).toBe(
 			"https://openrouter.ai/settings/keys",
 		);
+		expect(getProviderApiKeyUrl({ id: "goodvision" })).toBe(
+			"https://console-test.goodvision.tech/console/router-settings",
+		);
 	});
 
 	it("returns null for unknown providers", () => {

@@ -44,6 +44,16 @@ describe("getProviderConfigFields", () => {
 		);
 	});
 
+	it("returns api-key auth with apiKey + an editable baseUrl for GoodVision", () => {
+		const result = getProviderConfigFields("goodvision");
+		expect(result.authMethod).toBe("api-key");
+		expect(result.fields.apiKey).toBeDefined();
+		expect(result.fields.baseUrl?.defaultValue).toBe(
+			LlmsModels.MODEL_COLLECTIONS_BY_PROVIDER_ID.goodvision?.provider.baseUrl,
+		);
+		expect(result.fields.baseUrl?.defaultValue).toMatch(/goodvision\.tech/);
+	});
+
 	it("returns api-key auth with apiKey + baseUrl for user-added providers", () => {
 		registerCustomProvider("internal-router", {
 			provider: {

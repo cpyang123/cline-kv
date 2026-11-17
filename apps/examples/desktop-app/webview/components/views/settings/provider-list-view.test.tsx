@@ -142,6 +142,111 @@ describe("ProviderDetailContent models", () => {
 	});
 });
 
+describe("ProviderDetailContent OpenAI-compatible fields", () => {
+	let container: HTMLDivElement;
+	let root: Root;
+
+	beforeEach(() => {
+		Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+		window.localStorage.clear();
+		container = document.createElement("div");
+		document.body.appendChild(container);
+		root = createRoot(container);
+	});
+
+	afterEach(async () => {
+		await act(async () => root.unmount());
+		container.remove();
+	});
+
+	// The configFields the SDK catalog sends for these providers.
+	const credentialFields: NonNullable<Provider["configFields"]> = [
+		{ path: "apiKey", label: "API Key", type: "password", secret: true },
+		{ path: "baseUrl", label: "Base URL", type: "url" },
+	];
+
+	it("saves the API select and turns Not set into a cleared key", async () => {
+		const onUpdate = vi.fn();
+		await act(async () => {
+			root.render(
+				<ProviderDetailContent
+					modelsError={null}
+					onBack={vi.fn()}
+					onLoadModels={vi.fn()}
+					onUpdate={onUpdate}
+					provider={{
+						...provider,
+						id: "openai-compatible",
+						name: "OpenAI Compatible",
+						configFields: [
+							...credentialFields,
+							{
+								path: "protocol",
+								label: "API",
+								type: "select",
+								description: "Not set means Auto.",
+								options: [
+									{ label: "Chat Completions", value: "openai-chat" },
+									{ label: "Responses", value: "openai-responses" },
+								],
+							},
+						],
+						configValues: { protocol: "openai-responses" },
+					}}
+				/>,
+			);
+		});
+
+		const select = container.querySelector("select");
+		expect(select?.value).toBe("openai-responses");
+		expect([...(select?.options ?? [])].map((option) => option.text)).toEqual([
+			"Not set",
+			"Chat Completions",
+			"Responses",
+		]);
+		await act(async () => {
+			if (!select) return;
+			select.value = "openai-chat";
+			select.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		expect(onUpdate).toHaveBeenLastCalledWith({
+			configValues: { protocol: "openai-chat" },
+		});
+		await act(async () => {
+			if (!select) return;
+			select.value = "";
+			select.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		expect(onUpdate).toHaveBeenLastCalledWith({
+			configValues: { protocol: null },
+		});
+	});
+
+	it("links GoodVision's API key field to its console", async () => {
+		await act(async () => {
+			root.render(
+				<ProviderDetailContent
+					modelsError={null}
+					onBack={vi.fn()}
+					onLoadModels={vi.fn()}
+					onUpdate={vi.fn()}
+					provider={{
+						...provider,
+						id: "goodvision",
+						name: "GoodVision SmartRouter",
+						configFields: credentialFields,
+					}}
+				/>,
+			);
+		});
+		expect(container.querySelector('input[type="password"]')).not.toBeNull();
+		expect(container.querySelector('input[type="url"]')).not.toBeNull();
+		expect(container.textContent).toContain(
+			"Get a GoodVision SmartRouter API key",
+		);
+	});
+});
+
 const catalogProviders: Provider[] = [
 	{
 		id: "anthropic",

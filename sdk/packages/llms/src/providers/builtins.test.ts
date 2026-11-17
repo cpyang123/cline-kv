@@ -313,6 +313,26 @@ describe("built-in provider metadata", () => {
 		});
 	});
 
+	it("gives OpenAI Compatible its credential fields plus an API (protocol) select", async () => {
+		const provider = await getProvider("openai-compatible");
+		const fields = provider?.metadata?.configFields ?? [];
+		expect(fields.map((field) => field.path)).toEqual([
+			"apiKey",
+			"baseUrl",
+			"protocol",
+		]);
+		expect(fields[2]).toMatchObject({
+			label: "API",
+			type: "select",
+			options: [
+				{ label: "Chat Completions", value: "openai-chat" },
+				{ label: "Responses", value: "openai-responses" },
+			],
+		});
+		// Unset means Auto: no default value is stamped.
+		expect(fields[2]).not.toHaveProperty("defaultValue");
+	});
+
 	it("registers ElevenLabs Scribe v2 as a dedicated transcription provider", async () => {
 		await expect(getProvider("elevenlabs")).resolves.toMatchObject({
 			id: "elevenlabs",

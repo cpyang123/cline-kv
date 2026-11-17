@@ -85,6 +85,14 @@ export function addRootOptions(cmd: Command): Command {
 				"--worktree",
 				"Auto-create a detached git worktree under ~/.cline/worktrees/ and run the task there",
 			)
+			.option(
+				"--memory",
+				"Use the Knowledge Vault (workspace memory) for this run, whatever the /settings toggle says",
+			)
+			.option(
+				"--no-memory",
+				"Skip the Knowledge Vault (no recall, no note) for this run",
+			)
 			.option("--update", "Check for updates and install if available")
 			.option("--kanban", "Run the kanban app")
 			.option("-v, --verbose", "Show verbose output")
@@ -227,6 +235,7 @@ export function commanderToParsedArgs(program: Command): ParsedArgs {
 	if (opts.key !== undefined) result.key = opts.key;
 	else if (opts.apiKey !== undefined) result.key = opts.apiKey;
 	if (opts.id !== undefined) result.id = opts.id;
+	if (typeof opts.memory === "boolean") result.memory = opts.memory;
 
 	// Positional args → prompt
 	const positional = program.args;

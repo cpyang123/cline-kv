@@ -472,6 +472,28 @@ const QWEN_CONFIG_FIELDS: readonly ProviderConfigField[] = [
 	},
 ];
 
+/**
+ * The built-in OpenAI Compatible provider: its default credential fields plus
+ * the API it speaks (providers.json `protocol`). Left unset it is Auto: the
+ * vendor routes OpenAI/Azure reasoning models through Responses with a Chat
+ * Completions fallback, and everything else through Chat Completions.
+ */
+const OPENAI_COMPATIBLE_CONFIG_FIELDS: readonly ProviderConfigField[] = [
+	API_KEY_FIELD,
+	BASE_URL_FIELD,
+	{
+		path: "protocol",
+		label: "API",
+		type: "select",
+		description:
+			"Which OpenAI API the endpoint speaks. Not set means Auto: Responses for OpenAI and Azure OpenAI reasoning models (falling back to Chat Completions), Chat Completions otherwise.",
+		options: [
+			{ label: "Chat Completions", value: "openai-chat" },
+			{ label: "Responses", value: "openai-responses" },
+		],
+	},
+];
+
 function defaultConfigFieldsForSpec(
 	spec: BuiltinSpec,
 ): readonly ProviderConfigField[] {
@@ -1008,6 +1030,7 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		defaultModelId: "gpt-4o",
 		apiKeyEnv: ["OPENAI_API_KEY"],
 		defaults: { baseUrl: "https://api.openai.com/v1" },
+		configFields: OPENAI_COMPATIBLE_CONFIG_FIELDS,
 		metadata: {
 			// Self-hosted endpoints (vLLM, llama.cpp, LM Studio) run without a key.
 			apiKeyOptional: true,

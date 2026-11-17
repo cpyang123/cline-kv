@@ -19,6 +19,11 @@ import {
 import { memo, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { resolveCredentialFailureAction } from "@/hooks/chat-session/helpers";
+import {
+	isServedByDifferentModel,
+	KNOWLEDGE_VAULT_MESSAGE_KIND,
+	PROVIDER_NOTICE_MESSAGE_KIND,
+} from "@/hooks/chat-session/live-markers";
 import type {
 	ChatMessage,
 	ChatMessageImage,
@@ -34,6 +39,7 @@ import { formatChatMessageContent } from "../message-content";
 import { isSystemSteeringMessage } from "./group-messages";
 import { MessageImageCarousel } from "./image-carousel";
 import { ReasoningBlock } from "./reasoning-block";
+import { KnowledgeVaultRow, ProviderNoticeRow } from "./status-rows";
 
 function MessageImages({
 	images,
@@ -195,6 +201,36 @@ export const MessageBubble = memo(function MessageBubble({
 	if (isSystemSteeringMessage(message)) {
 		return null;
 	}
+	const messageKind = message.meta?.messageKind;
+	if (
+		message.role === "status" &&
+		messageKind === KNOWLEDGE_VAULT_MESSAGE_KIND
+	) {
+		const marker = message.meta?.knowledgeVault;
+		return marker ? (
+			<AgentMessage data-kind={messageKind} from="status">
+				<KnowledgeVaultRow marker={marker} />
+			</AgentMessage>
+		) : null;
+	}
+	if (
+		message.role === "status" &&
+		messageKind === PROVIDER_NOTICE_MESSAGE_KIND
+	) {
+		return (
+			<AgentMessage data-kind={messageKind} from="status">
+				<ProviderNoticeRow content={message.content} />
+			</AgentMessage>
+		);
+	}
+	const servedModelId =
+		message.role === "assistant" &&
+		isServedByDifferentModel(
+			message.meta?.responseModelId,
+			message.meta?.modelId,
+		)
+			? message.meta?.responseModelId
+			: undefined;
 	const displayContent = formatChatMessageContent(
 		message.role,
 		message.content,
@@ -409,6 +445,19 @@ export const MessageBubble = memo(function MessageBubble({
 								<SplitIcon className="h-3 w-3 rotate-90" />
 							)}
 						</MessageAction>
+					) : null}
+					{servedModelId ? (
+						<span
+							className="truncate text-xs leading-none text-muted-foreground/70"
+							data-served-model
+							title={`The provider answered with ${servedModelId}${
+								message.meta?.modelId
+									? ` (selected: ${message.meta.modelId})`
+									: ""
+							}`}
+						>
+							answered by {servedModelId}
+						</span>
 					) : null}
 					{messageTimestamp}
 					{forkError ? (

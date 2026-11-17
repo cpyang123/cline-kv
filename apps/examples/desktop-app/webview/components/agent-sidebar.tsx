@@ -10,6 +10,7 @@ import {
 	ArrowLeft,
 	ArrowRight,
 	Blocks,
+	Brain,
 	Bug,
 	ChevronDown,
 	CircleUserRound,
@@ -164,6 +165,7 @@ function hubPort(url: string | null): string | null {
 
 const SETTINGS_SECTION_ICONS = {
 	General: SlidersHorizontal,
+	Memory: Brain,
 	Providers: Plug,
 	"Local Models": Cpu,
 	Voice: Mic,

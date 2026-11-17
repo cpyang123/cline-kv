@@ -339,6 +339,9 @@ async function projectAgentEvent(
 					},
 					usage: usageSummary?.usage,
 					aggregateUsage: usageSummary?.aggregateUsage,
+					...(agentEvent.responseModelId
+						? { responseModelId: agentEvent.responseModelId }
+						: {}),
 					agent: {
 						kind:
 							event.payload.teamRole === "teammate"

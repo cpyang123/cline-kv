@@ -9,8 +9,12 @@ import {
 } from "../../../utils/provider-auth";
 import {
 	buildClinePassSubscriptionPageUrl,
+	cycleProviderApiProtocol,
+	formatProviderApiProtocol,
+	normalizeProviderApiProtocol,
 	resolveOAuthWaitKeyAction,
 	saveManualProviderApiKey,
+	supportsApiProtocolSetting,
 } from "./provider-picker-helpers";
 
 describe("resolveOAuthWaitKeyAction", () => {
@@ -160,5 +164,61 @@ describe("saveManualProviderApiKey", () => {
 		expect(getPersistedProviderApiKey("cline-pass", clinePassSettings)).toBe(
 			"manual-api-key",
 		);
+	});
+});
+
+describe("OpenAI-compatible API protocol control", () => {
+	it("is offered only for the OpenAI-compatible provider", () => {
+		expect(supportsApiProtocolSetting("openai-compatible")).toBe(true);
+		expect(supportsApiProtocolSetting("goodvision")).toBe(false);
+		expect(supportsApiProtocolSetting("openai-native")).toBe(false);
+	});
+
+	it("cycles Auto, Chat Completions and Responses", () => {
+		expect(cycleProviderApiProtocol(undefined)).toBe("openai-chat");
+		expect(cycleProviderApiProtocol("openai-chat")).toBe("openai-responses");
+		expect(cycleProviderApiProtocol("openai-responses")).toBeUndefined();
+		expect(cycleProviderApiProtocol(undefined, -1)).toBe("openai-responses");
+		expect(formatProviderApiProtocol(undefined)).toBe("Auto");
+		expect(formatProviderApiProtocol("openai-chat")).toBe("Chat Completions");
+		expect(normalizeProviderApiProtocol("anthropic")).toBeUndefined();
+		expect(normalizeProviderApiProtocol("openai-responses")).toBe(
+			"openai-responses",
+		);
+	});
+
+	it("drops the saved protocol when Auto is saved", async () => {
+		const { saveLocalProviderSettings } = await import("@cline/core");
+		const dir = mkdtempSync(join(tmpdir(), "cli-protocol-"));
+		try {
+			const manager = new ProviderSettingsManager({
+				filePath: join(dir, "providers.json"),
+			});
+			await saveLocalProviderSettings(manager, {
+				providerId: "openai-compatible",
+				apiKey: "sk",
+				baseUrl: "https://llm.example.test/v1",
+				protocol: "openai-responses",
+			});
+			expect(manager.getProviderSettings("openai-compatible")?.protocol).toBe(
+				"openai-responses",
+			);
+			await saveLocalProviderSettings(manager, {
+				providerId: "openai-compatible",
+				protocol: undefined,
+			});
+			const saved = manager.getProviderSettings("openai-compatible");
+			expect(saved?.protocol).toBeUndefined();
+			expect(saved?.baseUrl).toBe("https://llm.example.test/v1");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("GoodVision provider config", () => {
+	it("exposes the base URL field", async () => {
+		const { getProviderConfigFields } = await import("@cline/core");
+		expect(getProviderConfigFields("goodvision").fields.baseUrl).toBeDefined();
 	});
 });

@@ -48,6 +48,8 @@ export type ChatUsageEvent = {
 	cacheReadTokens?: number;
 	/** Cost of the latest model request. */
 	cost?: number;
+	/** The model the provider reports having served the request. */
+	responseModelId?: string;
 };
 
 export type ToolCallStartEvent = {

@@ -19,6 +19,9 @@ const PROVIDER_API_KEY_URLS: Record<string, string> = {
 	together: "https://api.together.ai/settings/api-keys",
 	cline: "https://app.cline.bot",
 	wandb: "https://wandb.ai/settings",
+	// GOODVISION_CONSOLE_URL in @cline/llms (the catalog's `docsUrl` for the
+	// SmartRouter): where its keys and routing policies are managed.
+	goodvision: "https://console-test.goodvision.tech/console/router-settings",
 };
 
 /** Cline account dashboard, where Cline API keys are created and managed. */
