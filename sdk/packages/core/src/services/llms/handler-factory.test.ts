@@ -662,6 +662,68 @@ describe("createAgentModelFromConfig", () => {
 		);
 	});
 
+	it.each([
+		"openai-chat",
+		"openai-responses",
+	] as const)("forwards apiProtocol %s as an OpenAI-compatible gateway provider option", async (apiProtocol) => {
+		const { createAgentModelFromConfig } = await import("./handler-factory");
+
+		createAgentModelFromConfig(
+			{
+				providerId: "openai-compatible",
+				modelId: "gpt-6-luna",
+				systemPrompt: "",
+				tools: [],
+				providerConfig: {
+					providerId: "openai-compatible",
+					modelId: "gpt-6-luna",
+					baseUrl: "https://example.openai.azure.com/openai/v1",
+					apiProtocol,
+				},
+			},
+			undefined,
+		);
+
+		expect(gatewayMock.createGateway).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				providerConfigs: [
+					expect.objectContaining({
+						providerId: "openai-compatible",
+						options: expect.objectContaining({ apiProtocol }),
+					}),
+				],
+			}),
+		);
+		// The built-in provider keeps its own registration: no openai-native
+		// bridge that would bypass the vendor's protocol choice.
+		expect(gatewayMock.registerProvider).not.toHaveBeenCalled();
+	});
+
+	it("omits apiProtocol (Auto) when the provider config does not set it", async () => {
+		const { createAgentModelFromConfig } = await import("./handler-factory");
+
+		createAgentModelFromConfig(
+			{
+				providerId: "openai-compatible",
+				modelId: "gpt-6-luna",
+				systemPrompt: "",
+				tools: [],
+				providerConfig: {
+					providerId: "openai-compatible",
+					modelId: "gpt-6-luna",
+					azure: { apiVersion: "2025-01-01-preview" },
+				},
+			},
+			undefined,
+		);
+
+		const [{ providerConfigs }] = gatewayMock.createGateway.mock
+			.calls[0] as unknown as [
+			{ providerConfigs: Array<{ options?: Record<string, unknown> }> },
+		];
+		expect(providerConfigs[0].options).not.toHaveProperty("apiProtocol");
+	});
+
 	it("does not forward Azure settings for non-OpenAI-compatible providers", async () => {
 		const { createAgentModelFromConfig } = await import("./handler-factory");
 

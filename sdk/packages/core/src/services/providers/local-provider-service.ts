@@ -719,7 +719,14 @@ async function prepareProviderUpdate(
 					registeredProvider?.baseUrl?.trim() ??
 					"",
 				defaultModelId: seedModelId ?? registeredProvider?.defaultModelId,
-				protocol: existingSettings.protocol ?? registeredProvider?.protocol,
+				// The built-in OpenAI Compatible provider has no protocol by
+				// default (Auto: the vendor picks Responses or Chat Completions);
+				// stamping the catalog's inferred "openai-chat" would pin it.
+				protocol:
+					existingSettings.protocol ??
+					(providerId === LlmsModels.BUILT_IN_PROVIDER.OPENAI_COMPATIBLE
+						? undefined
+						: registeredProvider?.protocol),
 				client: existingSettings.client ?? registeredProvider?.client,
 				capabilities:
 					existingSettings.capabilities ?? registeredProvider?.capabilities,

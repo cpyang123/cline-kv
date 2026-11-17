@@ -96,16 +96,45 @@ function extractTextPart(message: AgentMessage): string | undefined {
 function extractReasoningPart(
 	message: AgentMessage,
 ): { reasoning: string; redacted: boolean } | undefined {
+	// Text-free reasoning only carries replay metadata (an OpenAI Responses
+	// item without summary text); rendering it would show an empty row.
 	const parts = message.content.filter(
-		(part): part is AgentReasoningPart => part.type === "reasoning",
+		(part): part is AgentReasoningPart =>
+			part.type === "reasoning" &&
+			(part.text.length > 0 || part.redacted === true),
 	);
 	if (parts.length === 0) {
 		return undefined;
 	}
 	return {
-		reasoning: parts.map((part) => part.text).join(""),
+		reasoning: joinReasoningParts(parts),
 		redacted: parts.some((part) => part.redacted === true),
 	};
+}
+
+/**
+ * Separate OpenAI Responses reasoning items with a blank line: each item is
+ * its own block of thought, and joined directly they run together
+ * ("...checked the file.Now I'll edit..."). Other reasoning parts are
+ * chunks of one stream and join as before.
+ */
+function joinReasoningParts(parts: AgentReasoningPart[]): string {
+	let joined = "";
+	parts.forEach((part, index) => {
+		const separate =
+			index > 0 &&
+			(isResponsesReasoningItem(part) ||
+				isResponsesReasoningItem(parts[index - 1]));
+		joined += (separate ? "\n\n" : "") + part.text;
+	});
+	return joined;
+}
+
+function isResponsesReasoningItem(
+	part: AgentReasoningPart | undefined,
+): boolean {
+	const metadata = part?.metadata as { openaiResponses?: unknown } | undefined;
+	return Boolean(metadata?.openaiResponses);
 }
 
 function extractToolResultPart(

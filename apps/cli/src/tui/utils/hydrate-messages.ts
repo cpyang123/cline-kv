@@ -149,6 +149,9 @@ export function hydrateSessionMessages(
 			}
 
 			if (block.type === "thinking") {
+				// Blocks with no text only carry replay data (e.g. an OpenAI
+				// Responses reasoning item without a summary): nothing to show.
+				if (!block.thinking) continue;
 				entries.push({
 					kind: "reasoning",
 					text: block.thinking,

@@ -284,6 +284,9 @@ export interface ModelCatalogConfig {
 // Main Configuration Interface
 // =============================================================================
 
+/** Explicit wire protocol choice for the built-in OpenAI Compatible provider. */
+export type OpenAICompatibleApiProtocol = "openai-chat" | "openai-responses";
+
 /**
  * Unified provider configuration interface
  *
@@ -312,6 +315,16 @@ export interface ProviderConfig
 	 * reusing the runtime behavior of a built-in provider implementation.
 	 */
 	routingProviderId?: ProviderId;
+
+	/**
+	 * Wire protocol for the built-in OpenAI Compatible provider: Chat
+	 * Completions or the Responses API. Unset means automatic: the Responses
+	 * API for OpenAI reasoning-era models on OpenAI and Azure OpenAI hosts,
+	 * Chat Completions otherwise. Either way, an endpoint that cannot serve
+	 * `/responses` falls back to Chat Completions. Reaches the vendor as
+	 * `options.apiProtocol`. Other providers ignore it.
+	 */
+	apiProtocol?: OpenAICompatibleApiProtocol;
 
 	/** Capabilities this provider/model supports */
 	capabilities?: ProviderCapability[];

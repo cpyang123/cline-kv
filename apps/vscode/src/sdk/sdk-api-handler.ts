@@ -26,6 +26,7 @@ import {
 	resolveProviderFetch,
 	resolveVertexProviderConfig,
 } from "./cline-session-factory"
+import { resolveOpenAICompatibleApiProtocol } from "./model-catalog/api-protocol"
 import { toSdkProviderId } from "./model-catalog/sdk-provider-id"
 import { getProviderSettingsManager } from "./provider-migration"
 
@@ -157,6 +158,10 @@ export function buildSdkProviderConfig(
 		// ignore an explicit Request Timeout setting and load models with
 		// Ollama's 4096-token server default.
 		...(providerId === "ollama" ? resolveOllamaProviderConfig(configuration, modelId) : {}),
+		// The OpenAI Compatible API setting (providers.json `protocol`), so
+		// commit messages, the Knowledge Vault writer and compaction use the
+		// same API as the agent loop.
+		...resolveOpenAICompatibleApiProtocol(providerId),
 		...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
 		...(options?.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
 	}

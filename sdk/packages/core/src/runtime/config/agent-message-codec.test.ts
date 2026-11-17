@@ -1,7 +1,12 @@
-import { EMPTY_CONTENT_TEXT, type MessageWithMetadata } from "@cline/shared";
+import {
+	type AgentMessage,
+	EMPTY_CONTENT_TEXT,
+	type MessageWithMetadata,
+} from "@cline/shared";
 import { describe, expect, it } from "vitest";
 import { projectSessionMessagesForDisplay } from "../../session/display-messages";
 import {
+	agentMessagesToMessages,
 	agentMessageToMessageWithMetadata,
 	messagesToAgentMessages,
 	messageToAgentMessages,
@@ -387,6 +392,163 @@ describe("agent message codec", () => {
 			"msg_mixed",
 			"msg_mixed_tool_call_a",
 			"msg_mixed_tool_call_b",
+		]);
+	});
+});
+
+describe("agent message codec: OpenAI Responses reasoning items", () => {
+	const item = {
+		itemId: "rs_1",
+		encryptedContent: "enc-1",
+		providerId: "openai-compatible",
+		modelId: "gpt-6-luna",
+	};
+	const assistant: AgentMessage = {
+		id: "msg_reasoning",
+		role: "assistant",
+		createdAt: 1,
+		content: [
+			{
+				type: "reasoning",
+				text: "Plan",
+				metadata: { openaiResponses: item },
+			},
+			// An item without summary text still carries its replay data.
+			{
+				type: "reasoning",
+				text: "",
+				metadata: {
+					openaiResponses: {
+						...item,
+						itemId: "rs_2",
+						encryptedContent: "enc-2",
+					},
+				},
+			},
+			{ type: "text", text: "done" },
+		],
+	};
+
+	it("persists the item on the thinking block and restores it", () => {
+		const persisted = agentMessageToMessageWithMetadata(assistant);
+		expect(persisted.content).toEqual([
+			{
+				type: "thinking",
+				thinking: "Plan",
+				signature: undefined,
+				details: undefined,
+				openaiResponses: item,
+			},
+			{
+				type: "thinking",
+				thinking: "",
+				signature: undefined,
+				details: undefined,
+				openaiResponses: { ...item, itemId: "rs_2", encryptedContent: "enc-2" },
+			},
+			{ type: "text", text: "done" },
+		]);
+
+		// Session files are JSON.
+		const [restored] = messagesToAgentMessages([
+			JSON.parse(JSON.stringify(persisted)) as MessageWithMetadata,
+		]);
+		expect(restored?.content).toEqual(assistant.content);
+	});
+
+	it("survives the per-request rebuild", () => {
+		const rebuilt = messagesToAgentMessages(
+			agentMessagesToMessages([assistant]),
+		);
+		expect(rebuilt[0]?.content).toEqual(assistant.content);
+	});
+
+	it("keeps signatures beside the item", () => {
+		const [restored] = messageToAgentMessages({
+			role: "assistant",
+			content: [
+				{
+					type: "thinking",
+					thinking: "Plan",
+					signature: "sig",
+					openaiResponses: item,
+				},
+			],
+		});
+		expect(restored?.content[0]).toEqual({
+			type: "reasoning",
+			text: "Plan",
+			metadata: { signature: "sig", details: undefined, openaiResponses: item },
+		});
+	});
+
+	it("leaves blocks without an item as before", () => {
+		const [restored] = messageToAgentMessages({
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "plain" },
+				{ type: "thinking", thinking: "signed", signature: "sig" },
+			],
+		});
+		expect(restored?.content).toEqual([
+			{ type: "reasoning", text: "plain", metadata: undefined },
+			{
+				type: "reasoning",
+				text: "signed",
+				metadata: { signature: "sig", details: undefined },
+			},
+		]);
+		expect(
+			agentMessageToMessageWithMetadata({
+				id: "m",
+				role: "assistant",
+				createdAt: 1,
+				content: [{ type: "reasoning", text: "plain" }],
+			}).content,
+		).toEqual([
+			{
+				type: "thinking",
+				thinking: "plain",
+				signature: undefined,
+				details: undefined,
+			},
+		]);
+	});
+
+	it("drops malformed items and unknown fields", () => {
+		const persisted = agentMessageToMessageWithMetadata({
+			id: "m",
+			role: "assistant",
+			createdAt: 1,
+			content: [
+				{
+					type: "reasoning",
+					text: "no id",
+					metadata: { openaiResponses: { encryptedContent: "enc" } },
+				},
+				{
+					type: "reasoning",
+					text: "extra",
+					metadata: {
+						openaiResponses: { itemId: "rs_9", secret: "x", modelId: 3 },
+					},
+				},
+			],
+		});
+		expect(persisted.content).toEqual([
+			{
+				type: "thinking",
+				thinking: "no id",
+				signature: undefined,
+				details: undefined,
+			},
+			{
+				type: "thinking",
+				thinking: "extra",
+				signature: undefined,
+				details: undefined,
+				openaiResponses: { itemId: "rs_9" },
+			},
 		]);
 	});
 });

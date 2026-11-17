@@ -254,6 +254,30 @@ describe("provider model catalog handlers", () => {
 		expect(store.write).toHaveBeenCalledWith(providerId, { headers: {} })
 	})
 
+	it.each([
+		["openai-responses", "openai-responses"],
+		["openai-chat", "openai-chat"],
+		["auto", null],
+		["", null],
+	] as const)("writeProviderConfig maps api_protocol %j to %j and reads it back", async (wire, patched) => {
+		const { writeProviderConfig } = await import("../writeProviderConfig")
+		const providerId = parseProviderId("openai")
+		const updatedConfig: EffectiveProviderConfig = {
+			providerId,
+			...(patched ? { apiProtocol: patched } : {}),
+		}
+		const store = makeStore(updatedConfig)
+		const controller = makeController(store, makeCatalog())
+
+		const response = await writeProviderConfig(controller, {
+			providerId: "openai",
+			patch: { apiProtocol: wire, headers: {} },
+		})
+
+		expect(store.write).toHaveBeenCalledWith(providerId, { apiProtocol: patched })
+		expect(response.apiProtocol).toBe(patched ?? undefined)
+	})
+
 	it("commitModelSelection validates mode and commits model settings", async () => {
 		const { commitModelSelection } = await import("../commitModelSelection")
 		const providerId = parseProviderId("deepseek")

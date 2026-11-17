@@ -13,7 +13,9 @@ import type {
 	MediaBudgetState,
 	ModelToolExecution,
 	ModelToolName,
+	OpenAIResponsesReasoningMetadata,
 	ProviderErrorClass,
+	ReasoningPartMetadata,
 } from "@cline/shared";
 import {
 	type AiSdkFormatterMessage,
@@ -96,6 +98,7 @@ import type {
 	BuiltModelTools,
 	ProviderFactoryResult,
 	ProviderGeneratedMedia,
+	ProviderNotice,
 } from "./vendors/types";
 
 interface GatewayNormalizedUsage {
@@ -407,6 +410,16 @@ function buildAiSdkRequestMessages(
 ) {
 	const aiMessages = toAiSdkMessages(request.messages, systemPrompt, {
 		includeReasoning: shouldIncludeReasoningHistory(request, context),
+		// Only providers routed through the Responses router replay items: it
+		// re-sends without them when an endpoint rejects them. Others (codex,
+		// openai-native) keep dropping them, as before.
+		replayTarget: context.provider.metadata?.openaiResponses
+			? {
+					providerId: context.provider.id,
+					modelId: request.modelId,
+					endpoint: openaiResponsesEndpoint(context),
+				}
+			: undefined,
 		supportedInputModalities:
 			context.model.modalities?.input ??
 			(context.model.capabilities
@@ -748,11 +761,119 @@ function buildAiSdkRuntimeContext(
 	};
 }
 
+/**
+ * The OpenAI Responses reasoning item recorded on a reasoning part (see
+ * `emitAiSdkEvents`), when the part came from the Responses API.
+ */
+function readOpenAIResponsesReasoning(
+	metadata: unknown,
+): OpenAIResponsesReasoningMetadata | undefined {
+	if (!metadata || typeof metadata !== "object") return undefined;
+	const value = (metadata as ReasoningPartMetadata).openaiResponses;
+	if (!value || typeof value !== "object") return undefined;
+	return typeof value.itemId === "string" && value.itemId.length > 0
+		? value
+		: undefined;
+}
+
+/**
+ * Replay an OpenAI Responses reasoning item to the request it is safe for, or
+ * nothing. Encrypted reasoning only decrypts for the provider and model that
+ * produced it, so items from another provider or model (a mid-task switch, a
+ * resumed task on a new model) are dropped rather than sent to be rejected.
+ * The item is written under both `openai` and `azure` because @ai-sdk/openai
+ * reads prompt-part options only from the namespace its provider name picks
+ * (`azure` when the name contains "azure"), with no fallback.
+ */
+function toOpenAIResponsesReasoningPart(
+	item: OpenAIResponsesReasoningMetadata,
+	text: string,
+	target: OpenAIResponsesReplayTarget | undefined,
+): Extract<AiSdkFormatterPart, { type: "reasoning" }> | undefined {
+	if (
+		!target ||
+		item.providerId !== target.providerId ||
+		item.modelId !== target.modelId ||
+		item.endpoint !== target.endpoint
+	) {
+		return undefined;
+	}
+	const options = {
+		itemId: item.itemId,
+		reasoningEncryptedContent: item.encryptedContent ?? null,
+	};
+	return {
+		type: "reasoning",
+		text: sanitizeSurrogates(text),
+		providerOptions: { openai: options, azure: { ...options } },
+	};
+}
+
+/**
+ * Fold a reasoning part into the previous part of the same Responses item.
+ * The runtime keeps one part per item, so this only matters for histories
+ * assembled elsewhere; @ai-sdk/openai warns on (and skips) an empty part
+ * appended to an item, which would also drop that part's encrypted content.
+ */
+function mergeIntoPreviousReasoningItem(
+	content: AiSdkFormatterPart[],
+	part: Extract<AiSdkFormatterPart, { type: "reasoning" }>,
+): boolean {
+	const previous = content.at(-1);
+	const itemId = part.providerOptions?.openai?.itemId;
+	if (
+		previous?.type !== "reasoning" ||
+		typeof itemId !== "string" ||
+		previous.providerOptions?.openai?.itemId !== itemId
+	) {
+		return false;
+	}
+	if (part.text.length > 0) {
+		previous.text = previous.text
+			? `${previous.text}\n\n${part.text}`
+			: part.text;
+	}
+	const encrypted = part.providerOptions?.openai?.reasoningEncryptedContent;
+	if (typeof encrypted === "string") {
+		for (const namespace of ["openai", "azure"] as const) {
+			const options = previous.providerOptions?.[namespace];
+			if (options) options.reasoningEncryptedContent = encrypted;
+		}
+	}
+	return true;
+}
+
+interface OpenAIResponsesReplayTarget {
+	providerId: string;
+	modelId: string;
+	endpoint?: string;
+}
+
+/**
+ * The endpoint a Responses reasoning item belongs to: the configured base
+ * URL's origin and path (no query, no trailing slash), or undefined for the
+ * provider default. Recorded on capture and compared on replay.
+ */
+function openaiResponsesEndpoint(
+	context: GatewayProviderContext,
+): string | undefined {
+	const baseUrl = context.config?.baseUrl;
+	if (!baseUrl) return undefined;
+	try {
+		const url = new URL(baseUrl);
+		return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+	} catch {
+		return baseUrl.replace(/\/+$/, "");
+	}
+}
+
 function toAiSdkMessages(
 	messages: readonly AgentMessage[],
 	systemPrompt?: string,
 	options?: {
 		includeReasoning?: boolean;
+		/** Where OpenAI Responses reasoning items may be replayed to. */
+		replayTarget?: OpenAIResponsesReplayTarget;
 		supportedInputModalities?: readonly string[];
 	},
 ) {
@@ -771,6 +892,20 @@ function toAiSdkMessages(
 			if (part.type === "reasoning") {
 				if (!includeReasoning) {
 					skippedReasoning = true;
+					continue;
+				}
+				const openaiItem = readOpenAIResponsesReasoning(part.metadata);
+				if (openaiItem) {
+					const replayed = toOpenAIResponsesReasoningPart(
+						openaiItem,
+						part.text,
+						options?.replayTarget,
+					);
+					if (!replayed) {
+						skippedReasoning = true;
+					} else if (!mergeIntoPreviousReasoningItem(content, replayed)) {
+						content.push(replayed);
+					}
 					continue;
 				}
 				const metadata = part.metadata as Record<string, unknown> | undefined;
@@ -851,9 +986,57 @@ function toAiSdkMessages(
 			}
 		}
 
-		// A message left empty only because its reasoning was dropped is
-		// omitted entirely instead of forwarded as an empty turn.
-		const emptiedByDroppedReasoning = !includeReasoning && skippedReasoning;
+		// Only items that carry their encrypted content are replayed (checked
+		// after same-item parts are merged). Without it @ai-sdk/openai sends an
+		// `item_reference` (store unset, e.g. openai-native) or a bare reasoning
+		// item (store:false); both need the item stored server-side, which Zero
+		// Data Retention organisations and `store:false` requests do not have,
+		// so the request would fail with "item not found".
+		for (let index = content.length - 1; index >= 0; index--) {
+			const candidate = content[index];
+			const openaiOptions =
+				candidate?.type === "reasoning"
+					? candidate.providerOptions?.openai
+					: undefined;
+			if (
+				typeof openaiOptions?.itemId === "string" &&
+				typeof openaiOptions.reasoningEncryptedContent !== "string"
+			) {
+				content.splice(index, 1);
+				skippedReasoning = true;
+			}
+		}
+
+		// The Responses API requires every replayed reasoning item to be
+		// followed by the output item it led to ("Item 'rs_..' of type
+		// 'reasoning' was provided without its required following item"). A
+		// turn that ended while still reasoning (output limit, interrupted
+		// stream) or whose following item is not in the history (a
+		// provider-executed tool call) has none, so its item is dropped.
+		for (let index = content.length - 1; index >= 0; index--) {
+			const candidate = content[index];
+			const openaiOptions =
+				candidate?.type === "reasoning"
+					? candidate.providerOptions?.openai
+					: undefined;
+			if (typeof openaiOptions?.itemId !== "string") continue;
+			// Consecutive items (rs_1, rs_2, function_call) are the original
+			// output order; the chain only has to end in an output item.
+			const next = content[index + 1];
+			if (
+				next?.type !== "text" &&
+				next?.type !== "tool-call" &&
+				next?.type !== "reasoning"
+			) {
+				content.splice(index, 1);
+				skippedReasoning = true;
+			}
+		}
+
+		// A message left empty only because its reasoning was dropped (history
+		// reasoning disabled, or Responses items from another provider/model)
+		// is omitted entirely instead of forwarded as an empty turn.
+		const emptiedByDroppedReasoning = skippedReasoning;
 		if (content.length > 0) {
 			normalizedMessages.push({ role: message.role, content });
 		} else if (
@@ -1459,6 +1642,66 @@ function extractGoogleThoughtMetadata(
 }
 
 /**
+ * The OpenAI Responses reasoning item a reasoning stream part belongs to.
+ * @ai-sdk/openai puts it under `openai`, or `azure` when its provider name
+ * contains "azure": the item id on every reasoning part, and the encrypted
+ * content (`null` until then) on the reasoning-end that closes the item at
+ * `response.output_item.done`.
+ */
+function readOpenAIReasoningStreamMetadata(
+	part: AiSdkStreamPart,
+): { itemId: string; encryptedContent?: string } | undefined {
+	const providerMetadata =
+		part.providerMetadata && typeof part.providerMetadata === "object"
+			? (part.providerMetadata as Record<string, unknown>)
+			: undefined;
+	const metadata = providerMetadata?.openai ?? providerMetadata?.azure;
+	if (!metadata || typeof metadata !== "object") return undefined;
+	const { itemId, reasoningEncryptedContent } = metadata as Record<
+		string,
+		unknown
+	>;
+	if (typeof itemId !== "string" || itemId.length === 0) return undefined;
+	return typeof reasoningEncryptedContent === "string" &&
+		reasoningEncryptedContent.length > 0
+		? { itemId, encryptedContent: reasoningEncryptedContent }
+		: { itemId };
+}
+
+/** What `emitAiSdkEvents` knows about one Responses reasoning item. */
+interface OpenAIReasoningItemState {
+	encryptedContent?: string;
+	/** Some event for this item has been yielded. */
+	emitted: boolean;
+	/** The encrypted content the yielded events already carried. */
+	deliveredEncryptedContent?: string;
+	/** Stream part id (`<itemId>:<summaryIndex>`) of the last text delta. */
+	lastTextPartId?: string;
+}
+
+/** Notices a vendor queued while serving the request, as model events. */
+function* toNoticeEvents(
+	takeNotices: (() => ProviderNotice[]) | undefined,
+): Generator<AgentModelEvent> {
+	if (!takeNotices) return;
+	let notices: ProviderNotice[];
+	try {
+		notices = takeNotices();
+	} catch {
+		// Notices are informational; they must never fail the request.
+		return;
+	}
+	for (const notice of notices) {
+		yield {
+			type: "notice",
+			kind: notice.kind,
+			message: notice.message,
+			...(notice.metadata ? { metadata: notice.metadata } : {}),
+		};
+	}
+}
+
+/**
  * A stream error captured while the raw provider error object is still in
  * hand: the flattened display message plus its classification. Both are
  * derived here because the structure needed to classify does not survive
@@ -1565,8 +1808,53 @@ async function* emitAiSdkEvents(
 	capturedError?: { current: CapturedStreamError | undefined },
 	modelToolAdapters?: BuiltModelTools,
 	reportError?: (error: CapturedStreamError) => Promise<void>,
+	takeNotices?: () => ProviderNotice[],
 ): AsyncIterable<AgentModelEvent> {
 	const emittedToolCallIds = new Set<string>();
+	// Responses reasoning items, so each can be replayed on the next request
+	// (see `toOpenAIResponsesReasoningPart`): the id arrives with the item's
+	// first part, the encrypted content only with its last.
+	// Only providers behind the Responses router capture reasoning items for
+	// replay (see `toAiSdkMessages`); others stream reasoning text as before.
+	const captureOpenAIReasoning = Boolean(
+		context.provider.metadata?.openaiResponses,
+	);
+	const openaiReasoningItems = new Map<string, OpenAIReasoningItemState>();
+	const trackOpenAIReasoningItem = (item: {
+		itemId: string;
+		encryptedContent?: string;
+	}): OpenAIReasoningItemState => {
+		let state = openaiReasoningItems.get(item.itemId);
+		if (!state) {
+			state = { emitted: false };
+			openaiReasoningItems.set(item.itemId, state);
+		}
+		if (item.encryptedContent) state.encryptedContent = item.encryptedContent;
+		return state;
+	};
+	const replayEndpoint = openaiResponsesEndpoint(context);
+	const openaiReasoningEvent = (
+		itemId: string,
+		state: OpenAIReasoningItemState,
+		text: string,
+		part: AiSdkStreamPart,
+	): AgentModelEvent => {
+		state.emitted = true;
+		state.deliveredEncryptedContent = state.encryptedContent;
+		const metadata: ReasoningPartMetadata = {
+			...extractGoogleThoughtMetadata(part),
+			openaiResponses: {
+				itemId,
+				...(state.encryptedContent
+					? { encryptedContent: state.encryptedContent }
+					: {}),
+				providerId: context.provider.id,
+				modelId: request.modelId,
+				...(replayEndpoint ? { endpoint: replayEndpoint } : {}),
+			},
+		};
+		return { type: "reasoning-delta", text, itemId, metadata };
+	};
 	let finishReason: unknown;
 	let requestId: string | undefined;
 	let streamError: CapturedStreamError | undefined;
@@ -1593,6 +1881,9 @@ async function* emitAiSdkEvents(
 	try {
 		if (stream.fullStream) {
 			for await (const part of stream.fullStream) {
+				// Vendors queue notices inside the model call (e.g. a protocol
+				// fallback), so they surface ahead of the part that follows it.
+				yield* toNoticeEvents(takeNotices);
 				if (part.type === "start-step") {
 					requestId = undefined;
 					continue;
@@ -1613,11 +1904,57 @@ async function* emitAiSdkEvents(
 					continue;
 				}
 
+				if (part.type === "reasoning-start" || part.type === "reasoning-end") {
+					const item = captureOpenAIReasoning
+						? readOpenAIReasoningStreamMetadata(part)
+						: undefined;
+					if (item) {
+						const state = trackOpenAIReasoningItem(item);
+						// Hand the runtime what it lacks once the item closes: its
+						// encrypted content, or the item itself when it had no summary
+						// text. Text-free, so it is not visible content.
+						if (
+							part.type === "reasoning-end" &&
+							(!state.emitted ||
+								state.encryptedContent !== state.deliveredEncryptedContent)
+						) {
+							yield openaiReasoningEvent(item.itemId, state, "", part);
+						}
+					}
+					continue;
+				}
+
 				if (part.type === "reasoning-delta" || part.type === "reasoning") {
 					const text =
 						(part.textDelta as string | undefined) ??
 						(part.text as string | undefined) ??
 						(part.reasoning as string | undefined);
+					const openaiItem = captureOpenAIReasoning
+						? readOpenAIReasoningStreamMetadata(part)
+						: undefined;
+					if (openaiItem) {
+						const state = trackOpenAIReasoningItem(openaiItem);
+						if (text) {
+							// An item's summaries share one reasoning part; keep them
+							// apart like paragraphs.
+							const partId = typeof part.id === "string" ? part.id : undefined;
+							const separator =
+								partId !== undefined &&
+								state.lastTextPartId !== undefined &&
+								partId !== state.lastTextPartId
+									? "\n\n"
+									: "";
+							state.lastTextPartId = partId ?? state.lastTextPartId;
+							sawVisibleContent = true;
+							yield openaiReasoningEvent(
+								openaiItem.itemId,
+								state,
+								separator + text,
+								part,
+							);
+						}
+						continue;
+					}
 					if (text) {
 						sawVisibleContent = true;
 						yield {
@@ -2089,6 +2426,10 @@ async function* emitAiSdkEvents(
 		}
 	}
 
+	// Anything queued after the last part (or by a request that failed before
+	// producing one) still reaches the caller ahead of the finish.
+	yield* toNoticeEvents(takeNotices);
+
 	if (usageToEmit) {
 		yield {
 			type: "usage",
@@ -2104,7 +2445,11 @@ async function* emitAiSdkEvents(
 		type: "finish",
 		reason: streamError ? "error" : mapFinishReason(finishReason),
 		...(finishRequestId ? { requestId: finishRequestId } : {}),
-		error: withStreamLimitHint(streamError?.message, streamError?.error, context),
+		error: withStreamLimitHint(
+			streamError?.message,
+			streamError?.error,
+			context,
+		),
 		errorClass: streamError?.errorClass,
 		errorRetryable: streamError?.retryable,
 		errorReported: streamError?.reported,
@@ -2242,6 +2587,7 @@ function createAiSdkProvider(
 			};
 			let recordTraceError: ((error: unknown) => Promise<void>) | undefined;
 			let getAiSdkCallId: (() => string | undefined) | undefined;
+			let takeNotices: (() => ProviderNotice[]) | undefined;
 			let reportedError: CapturedStreamError | undefined;
 			const reportError = async (
 				captured: CapturedStreamError,
@@ -2317,6 +2663,7 @@ function createAiSdkProvider(
 					},
 					context,
 				);
+				takeNotices = provider.takeNotices?.bind(provider);
 				const composedProviderOptions = composeAiSdkProviderOptions(
 					request,
 					context,
@@ -2570,6 +2917,7 @@ function createAiSdkProvider(
 					capturedError,
 					modelToolAdapters,
 					reportError,
+					takeNotices,
 				);
 			} catch (error) {
 				suppressDanglingStreamPromises(stream);
@@ -2578,6 +2926,7 @@ function createAiSdkProvider(
 				const captured =
 					capturedError.current ?? captureStreamError(error, "request_start");
 				await reportError(captured, "provider.create_or_stream");
+				yield* toNoticeEvents(takeNotices);
 				yield {
 					type: "finish",
 					reason: "error",

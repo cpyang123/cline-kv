@@ -2557,6 +2557,24 @@ describe("updateLocalProvider", () => {
 		expect(models["model-b"].capabilities).toContain("images");
 	});
 
+	it("keeps the built-in OpenAI Compatible provider on Auto (no protocol stamped)", async () => {
+		const builtin = LlmsModels.BUILT_IN_PROVIDER.OPENAI_COMPATIBLE;
+		manager.saveProviderSettings(
+			{
+				provider: builtin,
+				apiKey: "azure-key",
+				baseUrl: "https://example.openai.azure.com/openai/v1",
+				model: "gpt-6-luna",
+			},
+			{ setLastUsed: false },
+		);
+		await updateLocalProvider(manager, {
+			providerId: builtin,
+			models: ["gpt-6-luna", "gpt-6-sol"],
+		});
+		expect(manager.getProviderSettings(builtin)).not.toHaveProperty("protocol");
+	});
+
 	it("updates provider settings and can clear optional fields", async () => {
 		await updateLocalProvider(manager, {
 			providerId: "editable-provider",

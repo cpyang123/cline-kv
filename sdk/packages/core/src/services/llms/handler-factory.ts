@@ -29,7 +29,7 @@ function compactOptions(
 
 function usesOpenAICompatibleClient(config: ProviderConfig): boolean {
 	return (
-		config.providerId === "openai-compatible" ||
+		normalizeProviderId(config.providerId) === "openai-compatible" ||
 		config.clientType === "openai-compatible"
 	);
 }
@@ -48,6 +48,9 @@ function buildGatewayProviderOptions(
 		Object.assign(options, {
 			apiVersion: config.azure?.apiVersion,
 			useIdentity: config.azure?.useIdentity,
+			// Chat Completions vs Responses for the built-in provider; the vendor
+			// reads it as `config.options.apiProtocol` (unset means Auto).
+			apiProtocol: config.apiProtocol,
 		});
 	}
 

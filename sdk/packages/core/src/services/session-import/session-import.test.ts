@@ -879,6 +879,37 @@ describe("sanitizeImportedMessages", () => {
 		const leftovers = blocks(sanitized[3]);
 		expect(leftovers).toEqual([{ type: "text", text: "also do this next" }]);
 	});
+
+	it("strips OpenAI Responses reasoning items from thinking blocks", () => {
+		const openaiResponses = {
+			itemId: "rs_1",
+			encryptedContent: "enc-secret",
+			providerId: "openai-compatible",
+			modelId: "gpt-6-luna",
+		};
+		const sanitized = sanitizeImportedMessages([
+			{ role: "user", content: "think" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "Plan", openaiResponses },
+					// Text-free items carry nothing worth keeping.
+					{
+						type: "thinking",
+						thinking: "",
+						openaiResponses: { ...openaiResponses, itemId: "rs_2" },
+					},
+					{ type: "text", text: "done" },
+				],
+			},
+		]);
+
+		expect(blocks(sanitized[1])).toEqual([
+			{ type: "thinking", thinking: "Plan" },
+			{ type: "text", text: "done" },
+		]);
+		expect(JSON.stringify(sanitized)).not.toContain("enc-secret");
+	});
 });
 
 // ---------------------------------------------------------------------------

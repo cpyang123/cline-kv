@@ -174,7 +174,11 @@ export function serializeMessage(message: MessageWithMetadata): string {
 				);
 				break;
 			case "thinking":
-				lines.push(`[Bot thinking]: ${truncateText(block.thinking, 2_000)}`);
+				// Text-free blocks only carry replay data (a Responses reasoning
+				// item without a summary).
+				if (block.thinking) {
+					lines.push(`[Bot thinking]: ${truncateText(block.thinking, 2_000)}`);
+				}
 				break;
 			case "redacted_thinking":
 				lines.push("[Bot thinking]: [redacted]");

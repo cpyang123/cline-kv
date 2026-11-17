@@ -27,7 +27,12 @@ function cleanBlocks(content: string | Block[]): string | Block[] {
 				continue;
 			case "thinking": {
 				if (!block.thinking?.trim()) continue;
-				const { signature: _signature, ...rest } = block;
+				const {
+					signature: _signature,
+					// Encrypted Responses reasoning only decrypts for its origin.
+					openaiResponses: _openaiResponses,
+					...rest
+				} = block;
 				cleaned.push(rest);
 				break;
 			}

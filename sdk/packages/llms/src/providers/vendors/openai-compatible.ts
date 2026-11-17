@@ -1,6 +1,10 @@
 import { createGateway } from "@ai-sdk/gateway";
+import type { OpenAIProvider } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import type { LanguageModelV4 } from "@ai-sdk/provider";
+import type {
+	LanguageModelV4,
+	LanguageModelV4Middleware,
+} from "@ai-sdk/provider";
 import type {
 	GatewayProviderContext,
 	GatewayResolvedProviderConfig,
@@ -8,12 +12,25 @@ import type {
 import { modelProducesImages } from "@cline/shared";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { wrapLanguageModel } from "ai";
+import type { OpenAICompatibleApiProtocol } from "../config";
 import { ensureFetch, resolveApiKey } from "../http";
 import { createAdaptiveToolTransportMiddleware } from "../middleware/adaptive-tool-transport";
-import { createStreamTimeLimitMiddleware } from "../middleware/stream-time-limit";
 import { promptToolsMiddleware } from "../middleware/prompt-tools";
 import { splitToolImagesMiddleware } from "../middleware/split-tool-images";
-import { isOpenAIReasoningEraModelId } from "../model-facts";
+import { createStreamTimeLimitMiddleware } from "../middleware/stream-time-limit";
+import {
+	isOpenAIChatVariantModelId,
+	isOpenAIReasoningEraModelId,
+} from "../model-facts";
+import { createReasoningToolsFallbackFetch } from "./reasoning-tools-fallback";
+import {
+	createResponsesRouteCheckFetch,
+	createResponsesRouterModel,
+	ProviderNoticeQueue,
+	protocolDecisionKey,
+	reasoningDisabledForToolsNotice,
+	stripResponsesReasoningMiddleware,
+} from "./responses-router";
 import type { ProviderFactoryResult } from "./types";
 
 type FetchInput = Parameters<typeof fetch>[0];
@@ -353,6 +370,80 @@ function toolTransportKey(context: GatewayProviderContext): string {
 	return `endpoint:${context.provider.id}|${context.config.baseUrl ?? ""}`;
 }
 
+/** Where the built-in OpenAI Compatible provider points when no base URL is set. */
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+
+/** Hosts known to serve OpenAI models through `<base URL>/responses`. */
+const OPENAI_RESPONSES_HOST_SUFFIXES = [
+	".openai.azure.com",
+	".cognitiveservices.azure.com",
+	".services.ai.azure.com",
+];
+
+/**
+ * Whether automatic protocol selection may use the Responses API for this
+ * base URL: OpenAI and Azure OpenAI hosts, except Azure's legacy
+ * `/openai/deployments/<name>` base URLs, which have no `/responses` route
+ * under them.
+ */
+function isOpenAIResponsesEndpoint(baseUrl: string): boolean {
+	let url: URL;
+	try {
+		url = new URL(baseUrl);
+	} catch {
+		return false;
+	}
+	const host = url.hostname.toLowerCase();
+	return (
+		(host === "api.openai.com" ||
+			OPENAI_RESPONSES_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) &&
+		!url.pathname.toLowerCase().includes("/openai/deployments/")
+	);
+}
+
+/** An Azure legacy deployment base URL (`.../openai/deployments/<name>`). */
+function isAzureDeploymentUrl(baseUrl: string | undefined): boolean {
+	if (!baseUrl) return false;
+	try {
+		return new URL(baseUrl).pathname
+			.toLowerCase()
+			.includes("/openai/deployments/");
+	} catch {
+		return false;
+	}
+}
+
+function readApiProtocol(
+	config: GatewayResolvedProviderConfig,
+): OpenAICompatibleApiProtocol | undefined {
+	const value = config.options?.apiProtocol;
+	return value === "openai-chat" || value === "openai-responses"
+		? value
+		: undefined;
+}
+
+function endpointHostOf(baseUrl: string | undefined): string {
+	if (baseUrl) {
+		try {
+			return new URL(baseUrl).host;
+		} catch {
+			// Fall through to the generic wording.
+		}
+	}
+	return "the endpoint";
+}
+
+/**
+ * `@ai-sdk/openai` keys its provider options and reasoning metadata on
+ * `azure` when the provider name contains "azure", on `openai` otherwise.
+ * Cline writes the `openai` bucket, so keep "azure" out of the name.
+ */
+function responsesProviderName(providerId: string): string {
+	return providerId.toLowerCase().includes("azure")
+		? "openai-compatible"
+		: providerId;
+}
+
 export async function createOpenAICompatibleProviderModule(
 	config: GatewayResolvedProviderConfig,
 	context: GatewayProviderContext,
@@ -362,18 +453,50 @@ export async function createOpenAICompatibleProviderModule(
 	// authoritative error and is surfaced to the user as-is. This keeps
 	// `llms` unopinionated about which providers do or don't need a key.
 	const apiKey = await resolveApiKey(config);
+	const notices = new ProviderNoticeQueue();
+	// Only providers that declare it route between the Responses API and
+	// Chat Completions; every other provider stays on Chat Completions.
+	const routesResponses = context.provider.metadata?.openaiResponses === "auto";
+	const apiProtocolSetting = routesResponses
+		? readApiProtocol(config)
+		: undefined;
+	const apiProtocol = apiProtocolSetting ?? "auto";
+	const baseUrl =
+		config.baseUrl ?? (routesResponses ? DEFAULT_OPENAI_BASE_URL : undefined);
+	const endpointHost = endpointHostOf(baseUrl);
 	const fetch = createAzureApiVersionFetch(config);
 	const onResponseError = readResponseErrorHandler(config);
 	const upstreamRetry = readUpstreamRetryPolicy(context.provider.metadata);
 	const retryingFetch = upstreamRetry
 		? createUpstreamRetryFetch(ensureFetch(fetch), upstreamRetry)
 		: fetch;
+	// Models that refuse function tools with a reasoning effort on Chat
+	// Completions (GPT-6 Luna) get the request re-sent with effort "none".
+	const reasoningFallbackFetch = createReasoningToolsFallbackFetch(
+		ensureFetch(retryingFetch),
+		{
+			onApplied: ({ model, requestedEffort, remembered }) => {
+				notices.push(
+					reasoningDisabledForToolsNotice({
+						modelId: model,
+						endpointHost,
+						...(routesResponses ? { apiProtocol } : {}),
+					}),
+				);
+				if (!remembered) {
+					context.logger?.log(
+						`[${context.provider.id}] ${model} refuses function tools with reasoning on chat completions (requested effort: ${requestedEffort}); sending its tool requests with reasoning_effort "none"`,
+					);
+				}
+			},
+		},
+	);
 	const providerFetch = onResponseError
 		? createResponseErrorFetch({
-				fetch: ensureFetch(retryingFetch),
+				fetch: reasoningFallbackFetch,
 				onResponseError,
 			})
-		: retryingFetch;
+		: reasoningFallbackFetch;
 	const provider = createOpenAICompatible({
 		name: context.provider.id,
 		apiKey,
@@ -425,52 +548,108 @@ export async function createOpenAICompatibleProviderModule(
 					}),
 				]
 			: [];
+	// A session that moved off the Responses API still carries its reasoning
+	// items, which Chat Completions must not replay as `reasoning_content`.
+	const chatHistoryMiddleware: LanguageModelV4Middleware[] = routesResponses
+		? [stripResponsesReasoningMiddleware]
+		: [];
+	// Wrap each constructed model with `splitToolImagesMiddleware` so
+	// `role:"tool"` messages whose `output.type === 'content'` carries
+	// image-data parts get split into a placeholder text + a synthetic
+	// `role:"user"` message carrying the images. The OpenAI Chat
+	// Completions wire format does NOT support multimodal tool messages
+	// (the `@ai-sdk/openai-compatible` chat-messages converter
+	// `JSON.stringify`s the parts array, losing image bytes). The
+	// middleware operates on the typed `LanguageModelV4Prompt` BEFORE
+	// the converter runs, so the converter sees only text-only tool
+	// messages with adjacent multimodal user messages — the wire
+	// pattern that classic Cline used in production for years (see
+	// `convertToOpenAiMessages` in `src/core/api/transform/openai-format.ts`
+	// on origin/main).
+	const chatModel = (modelId: string): LanguageModelV4 =>
+		wrapLanguageModel({
+			model: (openRouterImageProvider?.chat(modelId) ??
+				provider(modelId)) as LanguageModelV4,
+			// `toolTransport: "prompt"` endpoints refuse native tool
+			// definitions: tools are emulated through the prompt first,
+			// so no tool messages remain for the image split to handle.
+			// `"auto"` endpoints may or may not accept them (GoodVision,
+			// depending on the key's routing policy): the session's first
+			// tool-bearing request decides, see adaptive-tool-transport.ts.
+			middleware:
+				toolTransport === "prompt"
+					? [
+							promptToolsMiddleware,
+							splitToolImagesMiddleware,
+							...streamTimeLimit,
+							...chatHistoryMiddleware,
+						]
+					: toolTransport === "auto"
+						? [
+								createAdaptiveToolTransportMiddleware({
+									key: toolTransportKey(context),
+									onDecision: (decision) =>
+										context.logger?.log(
+											`[${context.provider.id}] tool transport: ${decision.transport} (${decision.reason})`,
+										),
+								}),
+								splitToolImagesMiddleware,
+								...streamTimeLimit,
+								...chatHistoryMiddleware,
+							]
+						: [
+								splitToolImagesMiddleware,
+								...streamTimeLimit,
+								...chatHistoryMiddleware,
+							],
+		}) as LanguageModelV4;
+	const responsesProvider = await createResponsesProvider({
+		routesResponses,
+		apiProtocol,
+		apiKey,
+		baseUrl,
+		config,
+		context,
+		// Transports that only exist for Chat Completions keep it.
+		chatOnly:
+			toolTransport !== undefined ||
+			streamTimeLimit.length > 0 ||
+			useOpenRouterImageTransport,
+		fetch: retryingFetch,
+		onResponseError,
+	});
 	return {
-		// Wrap each constructed model with `splitToolImagesMiddleware` so
-		// `role:"tool"` messages whose `output.type === 'content'` carries
-		// image-data parts get split into a placeholder text + a synthetic
-		// `role:"user"` message carrying the images. The OpenAI Chat
-		// Completions wire format does NOT support multimodal tool messages
-		// (the `@ai-sdk/openai-compatible` chat-messages converter
-		// `JSON.stringify`s the parts array, losing image bytes). The
-		// middleware operates on the typed `LanguageModelV4Prompt` BEFORE
-		// the converter runs, so the converter sees only text-only tool
-		// messages with adjacent multimodal user messages — the wire
-		// pattern that classic Cline used in production for years (see
-		// `convertToOpenAiMessages` in `src/core/api/transform/openai-format.ts`
-		// on origin/main).
 		operations: {
-			language: (modelId) =>
-				wrapLanguageModel({
-					model: (openRouterImageProvider?.chat(modelId) ??
-						provider(modelId)) as LanguageModelV4,
-					// `toolTransport: "prompt"` endpoints refuse native tool
-					// definitions: tools are emulated through the prompt first,
-					// so no tool messages remain for the image split to handle.
-					// `"auto"` endpoints may or may not accept them (GoodVision,
-					// depending on the key's routing policy): the session's first
-					// tool-bearing request decides, see adaptive-tool-transport.ts.
-					middleware:
-						toolTransport === "prompt"
-							? [
-									promptToolsMiddleware,
-									splitToolImagesMiddleware,
-									...streamTimeLimit,
-								]
-							: toolTransport === "auto"
-								? [
-										createAdaptiveToolTransportMiddleware({
-											key: toolTransportKey(context),
-											onDecision: (decision) =>
-												context.logger?.log(
-													`[${context.provider.id}] tool transport: ${decision.transport} (${decision.reason})`,
-												),
-										}),
-										splitToolImagesMiddleware,
-										...streamTimeLimit,
-									]
-								: [splitToolImagesMiddleware, ...streamTimeLimit],
-				}),
+			language: (modelId) => {
+				const chat = chatModel(modelId);
+				if (
+					!responsesProvider ||
+					(apiProtocol === "auto" &&
+						(!isOpenAIReasoningEraModelId(modelId) ||
+							// gpt-5-chat and similar are not reasoning models.
+							isOpenAIChatVariantModelId(modelId)))
+				) {
+					return chat;
+				}
+				return createResponsesRouterModel({
+					chat,
+					responses: responsesProvider.responses(modelId) as LanguageModelV4,
+					// Per mode: a fallback remembered under Auto must not stop an
+					// explicit Responses choice from trying /responses again.
+					memoryKey: `${protocolDecisionKey(
+						baseUrl ?? DEFAULT_OPENAI_BASE_URL,
+						modelId,
+					)}|${apiProtocol}`,
+					modelId,
+					endpointHost,
+					apiProtocol:
+						apiProtocol === "openai-responses" ? apiProtocol : "auto",
+					azureDeploymentUrl: isAzureDeploymentUrl(baseUrl),
+					notices,
+					logger: context.logger,
+					label: context.provider.id,
+				});
+			},
 			imageGeneration: (modelId) =>
 				vercelGateway
 					? vercelGateway.imageModel(modelId)
@@ -478,5 +657,77 @@ export async function createOpenAICompatibleProviderModule(
 						? openRouterImageProvider.imageModel(modelId)
 						: provider.imageModel(modelId),
 		},
+		takeNotices: () => notices.take(),
 	};
+}
+
+/**
+ * The Responses API provider for a module whose requests may use it, else
+ * undefined (the module serves Chat Completions only). Per-model selection
+ * happens in `language`.
+ */
+async function createResponsesProvider(input: {
+	routesResponses: boolean;
+	apiProtocol: "auto" | OpenAICompatibleApiProtocol;
+	apiKey: string | undefined;
+	baseUrl: string | undefined;
+	config: GatewayResolvedProviderConfig;
+	context: GatewayProviderContext;
+	chatOnly: boolean;
+	/** The vendor's fetch chain below the Chat Completions reasoning fallback. */
+	fetch: typeof fetch | undefined;
+	onResponseError: ResponseErrorHandler | undefined;
+}): Promise<OpenAIProvider | undefined> {
+	const { apiProtocol, apiKey, config, onResponseError } = input;
+	const baseUrl = input.baseUrl ?? DEFAULT_OPENAI_BASE_URL;
+	if (
+		!input.routesResponses ||
+		input.chatOnly ||
+		apiProtocol === "openai-chat" ||
+		// Automatic selection only for OpenAI's own hosts with a key: a
+		// keyless endpoint is a self-hosted server, which speaks chat.
+		(apiProtocol === "auto" && (!apiKey || !isOpenAIResponsesEndpoint(baseUrl)))
+	) {
+		return undefined;
+	}
+	// The Responses leg shares the fetch chain except the reasoning fallback,
+	// which only applies to Chat Completions bodies.
+	// A server without the route may also answer it with a JSON error and
+	// status 200 (LM Studio); that is turned into the 404 it means.
+	const routeCheckedFetch = createResponsesRouteCheckFetch(
+		ensureFetch(input.fetch),
+	);
+	const responsesFetch = onResponseError
+		? createResponseErrorFetch({
+				fetch: routeCheckedFetch,
+				onResponseError,
+			})
+		: routeCheckedFetch;
+	try {
+		const { createOpenAI } = await import("@ai-sdk/openai");
+		return createOpenAI({
+			name: responsesProviderName(input.context.provider.id),
+			// Always explicit: without it `@ai-sdk/openai` reads OPENAI_API_KEY
+			// (and OPENAI_BASE_URL) from the environment and would send that key
+			// to whatever endpoint is configured. A keyless endpoint the user
+			// explicitly put on the Responses API gets an empty key and no
+			// Authorization header, exactly like its Chat Completions requests.
+			apiKey: apiKey ?? "",
+			baseURL: baseUrl,
+			headers: apiKey
+				? config.headers
+				: ({ Authorization: undefined, ...config.headers } as unknown as Record<
+						string,
+						string
+					>),
+			...(responsesFetch ? { fetch: responsesFetch } : {}),
+		});
+	} catch (error) {
+		// The adapter validates OPENAI_BASE_URL when it loads; a bad value in
+		// the environment must not take Chat Completions down with it.
+		input.context.logger?.log(
+			`[${input.context.provider.id}] Responses API unavailable (${error instanceof Error ? error.message : String(error)}); using Chat Completions`,
+		);
+		return undefined;
+	}
 }

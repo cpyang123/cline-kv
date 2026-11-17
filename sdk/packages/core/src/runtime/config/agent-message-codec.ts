@@ -8,6 +8,8 @@ import type {
 	MediaContent,
 	Message,
 	MessageWithMetadata,
+	OpenAIResponsesReasoningMetadata,
+	ReasoningPartMetadata,
 	RedactedThinkingContent,
 	TextContent,
 	ThinkingContent,
@@ -182,16 +184,21 @@ function contentBlockToAgentPart(block: ContentBlock): AgentMessagePart {
 	switch (block.type) {
 		case "text":
 			return { type: "text", text: block.text };
-		case "thinking":
+		case "thinking": {
+			const metadata = block.signature
+				? { signature: block.signature, details: block.details }
+				: block.details
+					? { details: block.details }
+					: undefined;
+			const openaiResponses = toOpenAIResponsesReasoning(block.openaiResponses);
 			return {
 				type: "reasoning",
 				text: block.thinking,
-				metadata: block.signature
-					? { signature: block.signature, details: block.details }
-					: block.details
-						? { details: block.details }
-						: undefined,
+				metadata: openaiResponses
+					? ({ ...metadata, openaiResponses } satisfies ReasoningPartMetadata)
+					: metadata,
 			};
+		}
 		case "redacted_thinking":
 			return {
 				type: "reasoning",
@@ -222,6 +229,27 @@ function contentBlockToAgentPart(block: ContentBlock): AgentMessagePart {
 	}
 }
 
+/**
+ * The OpenAI Responses reasoning item fields, copied field by field so
+ * nothing else rides along into requests or session files; undefined unless
+ * there is an item id to replay.
+ */
+function toOpenAIResponsesReasoning(
+	value: unknown,
+): OpenAIResponsesReasoningMetadata | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const { itemId, encryptedContent, providerId, modelId, endpoint } =
+		value as Record<string, unknown>;
+	if (typeof itemId !== "string" || itemId.length === 0) return undefined;
+	return {
+		itemId,
+		...(typeof encryptedContent === "string" ? { encryptedContent } : {}),
+		...(typeof providerId === "string" ? { providerId } : {}),
+		...(typeof modelId === "string" ? { modelId } : {}),
+		...(typeof endpoint === "string" ? { endpoint } : {}),
+	};
+}
+
 function toolResultContentToAgentPart(
 	block: ToolResultContent,
 ): AgentMessagePart {
@@ -250,13 +278,19 @@ function agentPartToContentBlock(
 				} satisfies RedactedThinkingContent;
 			}
 			const metadata = part.metadata as
-				| { signature?: string; details?: unknown[] }
+				| { signature?: string; details?: unknown[]; openaiResponses?: unknown }
 				| undefined;
+			// Kept on every request, not only on save: requests are rebuilt
+			// through this codec, and the Responses API needs the item back.
+			const openaiResponses = toOpenAIResponsesReasoning(
+				metadata?.openaiResponses,
+			);
 			return {
 				type: "thinking",
 				thinking: part.text,
 				signature: metadata?.signature,
 				details: metadata?.details,
+				...(openaiResponses ? { openaiResponses } : {}),
 			} satisfies ThinkingContent;
 		}
 		case "image":

@@ -6,6 +6,7 @@
  */
 
 import type { GeneratedMedia } from "./llms/media";
+import type { OpenAIResponsesReasoningMetadata } from "./llms/messages";
 import type { ModelInfo } from "./llms/model-info";
 import type {
 	ToolApprovalRequest,
@@ -35,7 +36,22 @@ export interface AgentReasoningPart {
 	type: "reasoning";
 	text: string;
 	redacted?: boolean;
+	/**
+	 * Provider replay metadata. For OpenAI Responses reasoning items this is a
+	 * {@link ReasoningPartMetadata} carrying `openaiResponses`; other keys
+	 * (e.g. Google thought signatures) may sit alongside it.
+	 */
 	metadata?: unknown;
+}
+
+/**
+ * Known keys of {@link AgentReasoningPart.metadata}. Merge, do not replace:
+ * a reasoning item's id arrives with its first delta, its encrypted content
+ * only when the item ends.
+ */
+export interface ReasoningPartMetadata {
+	openaiResponses?: OpenAIResponsesReasoningMetadata;
+	[key: string]: unknown;
 }
 
 export interface AgentImagePart {
@@ -312,6 +328,22 @@ export type AgentModelFinishReason =
  */
 export type ProviderErrorClass = "context_window_exceeded" | "auth" | "unknown";
 
+/**
+ * Kinds of {@link AgentModelEvent} notices.
+ *
+ * - `responses_unavailable`: the endpoint could not serve the OpenAI
+ *   Responses API, so the request went through Chat Completions instead.
+ * - `reasoning_disabled_for_tools`: the model refuses function tools with a
+ *   reasoning effort on Chat Completions, so tool requests were sent with
+ *   reasoning off.
+ * - `reasoning_replay_dropped`: the endpoint rejected replayed reasoning
+ *   items, so the request was re-sent without them.
+ */
+export type ModelNoticeKind =
+	| "responses_unavailable"
+	| "reasoning_disabled_for_tools"
+	| "reasoning_replay_dropped";
+
 export type AgentModelEvent =
 	| { type: "text-delta"; text: string }
 	| { type: "media"; media: GeneratedMedia }
@@ -320,6 +352,25 @@ export type AgentModelEvent =
 			text: string;
 			redacted?: boolean;
 			metadata?: unknown;
+			/**
+			 * Provider-native id of the reasoning item this delta belongs to
+			 * (OpenAI Responses `rs_...`). Consecutive deltas with different ids
+			 * belong to different reasoning parts. A delta may carry metadata only
+			 * (empty `text`), e.g. the encrypted content sent when the item ends.
+			 */
+			itemId?: string;
+	  }
+	| {
+			/**
+			 * Something the user should know about how the request was served,
+			 * e.g. a protocol fallback. The runtime announces each `kind` (per
+			 * model) once per session as a status notice.
+			 */
+			type: "notice";
+			kind: ModelNoticeKind;
+			/** User-facing text, one or two sentences. */
+			message: string;
+			metadata?: Record<string, unknown>;
 	  }
 	| {
 			type: "tool-call-delta";

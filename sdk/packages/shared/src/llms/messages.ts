@@ -84,6 +84,32 @@ export interface ToolResultContent {
 }
 
 /**
+ * Replay metadata for one OpenAI Responses API reasoning item. Stateless
+ * Responses requests (`store: false`) must send the item back with its
+ * encrypted content on the next request for the model to keep its reasoning
+ * across tool calls. `providerId` / `modelId` record where the item came
+ * from: an item is replayed only to the same provider and model, since
+ * encrypted reasoning is not portable across models or endpoints.
+ */
+export interface OpenAIResponsesReasoningMetadata {
+	/** Responses API output item id (`rs_...`). */
+	itemId: string;
+	/** `reasoning.encrypted_content` returned with the item (store: false). */
+	encryptedContent?: string;
+	/** Provider id that produced the item (e.g. `openai-compatible`). */
+	providerId?: string;
+	/** Model id the item was produced by, as requested. */
+	modelId?: string;
+	/**
+	 * Endpoint (base URL origin + path) that produced the item. Items are
+	 * replayed only to the same endpoint: the built-in OpenAI Compatible
+	 * provider keeps one id whatever base URL it points at, and encrypted
+	 * reasoning from one resource must not be sent to another.
+	 */
+	endpoint?: string;
+}
+
+/**
  * Thinking/reasoning content block
  */
 export interface ThinkingContent {
@@ -98,6 +124,8 @@ export interface ThinkingContent {
 	details?: unknown[];
 	/** Backward-compatible alias used by some internal processors */
 	summary?: unknown[];
+	/** OpenAI Responses reasoning item to replay on the next request. */
+	openaiResponses?: OpenAIResponsesReasoningMetadata;
 }
 
 /**

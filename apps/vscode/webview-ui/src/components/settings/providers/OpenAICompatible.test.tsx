@@ -669,6 +669,76 @@ describe("OpenAICompatibleProvider", () => {
 		expect(screen.getByRole("checkbox", { name: "Use Azure Identity Authentication" })).toBeChecked()
 	})
 
+	describe("API protocol", () => {
+		function renderBuiltInProvider(apiProtocol?: string) {
+			mocks.useProviderConfig.mockReturnValue({
+				config: {
+					apiKeyLength: 12,
+					baseUrl: "https://example.openai.azure.com/openai/v1",
+					headers: {},
+					providerId: "openai",
+					...(apiProtocol !== undefined ? { apiProtocol } : {}),
+				},
+				commitSelection: mocks.commitSelection,
+				write: mocks.write,
+			})
+			return render(<OpenAICompatibleProvider currentMode="act" providerId="openai" showModelOptions={false} />)
+		}
+
+		it("shows Auto for the built-in provider without writing on mount", async () => {
+			renderBuiltInProvider()
+			await act(async () => {})
+
+			expect(screen.getByLabelText("API")).toHaveValue("auto")
+			expect(screen.getByRole("option", { name: "Chat Completions" })).toBeInTheDocument()
+			expect(screen.getByRole("option", { name: "Responses" })).toBeInTheDocument()
+			expect(mocks.write).not.toHaveBeenCalled()
+		})
+
+		it("reflects the stored protocol", async () => {
+			renderBuiltInProvider("openai-chat")
+			await act(async () => {})
+
+			expect(screen.getByLabelText("API")).toHaveValue("openai-chat")
+			expect(mocks.write).not.toHaveBeenCalled()
+		})
+
+		it("writes the selected protocol, and auto to clear it", async () => {
+			renderBuiltInProvider("openai-responses")
+			await act(async () => {})
+
+			fireEvent.change(screen.getByLabelText("API"), { target: { value: "auto" } })
+			await act(async () => {})
+			expect(mocks.write).toHaveBeenLastCalledWith({ apiProtocol: "auto" })
+
+			fireEvent.change(screen.getByLabelText("API"), { target: { value: "openai-chat" } })
+			await act(async () => {})
+			expect(mocks.write).toHaveBeenLastCalledWith({ apiProtocol: "openai-chat" })
+		})
+
+		it("compares a quick second change against the pending pick", async () => {
+			const pendingWrite = deferred<undefined>()
+			mocks.write.mockReturnValueOnce(pendingWrite.promise)
+			renderBuiltInProvider()
+			await act(async () => {})
+
+			fireEvent.change(screen.getByLabelText("API"), { target: { value: "openai-responses" } })
+			fireEvent.change(screen.getByLabelText("API"), { target: { value: "auto" } })
+
+			expect(mocks.write.mock.calls).toEqual([[{ apiProtocol: "openai-responses" }], [{ apiProtocol: "auto" }]])
+			await act(async () => {
+				pendingWrite.resolve(undefined)
+			})
+		})
+
+		it("is not offered for custom OpenAI-compatible providers", async () => {
+			renderProvider()
+			await act(async () => {})
+
+			expect(screen.queryByLabelText("API")).not.toBeInTheDocument()
+		})
+	})
+
 	it("writes editable Azure settings through the legacy handlers", async () => {
 		renderProvider()
 		await act(async () => {})

@@ -20,6 +20,18 @@ import ReasoningEffortSelector from "../ReasoningEffortSelector"
 import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandlers"
 import { useProviderApiKeyField } from "../utils/useProviderApiKeyField"
 
+type ApiProtocolOption = "auto" | "openai-chat" | "openai-responses"
+
+const API_PROTOCOL_OPTIONS: ReadonlyArray<{ value: ApiProtocolOption; label: string }> = [
+	{ value: "auto", label: "Auto" },
+	{ value: "openai-chat", label: "Chat Completions" },
+	{ value: "openai-responses", label: "Responses" },
+]
+
+function toApiProtocolOption(value: string | undefined): ApiProtocolOption {
+	return value === "openai-chat" || value === "openai-responses" ? value : "auto"
+}
+
 /**
  * Props for the OpenAICompatibleProvider component
  */
@@ -69,6 +81,24 @@ export const OpenAICompatibleProvider = ({
 	const handleProviderConfigWriteError = useCallback((fieldName: string, error: unknown) => {
 		console.error(`Failed to update OpenAI Compatible ${fieldName}:`, error)
 	}, [])
+
+	// providers.json is the only store for the API choice; an unset value is
+	// Auto. The pending value shows the user's pick while its write is in
+	// flight, so a quick second change compares against what they last chose.
+	const [pendingApiProtocol, setPendingApiProtocol] = useState<ApiProtocolOption | undefined>(undefined)
+	const selectedApiProtocol = pendingApiProtocol ?? toApiProtocolOption(config?.apiProtocol)
+	const handleApiProtocolChange = (value: string) => {
+		const next = toApiProtocolOption(value)
+		// Only a real change writes: the dropdown must never persist on mount
+		// or when it re-syncs to the loaded value.
+		if (next === selectedApiProtocol) {
+			return
+		}
+		setPendingApiProtocol(next)
+		void write({ apiProtocol: next })
+			.catch((error) => handleProviderConfigWriteError("API", error))
+			.finally(() => setPendingApiProtocol((current) => (current === next ? undefined : current)))
+	}
 
 	// Built-in "openai" persists model selection to its legacy ApiConfiguration
 	// fields; custom/unknown providers persist via their per-provider committed
@@ -526,6 +556,40 @@ export const OpenAICompatibleProvider = ({
 				}}>
 				Use Azure Identity Authentication
 			</VSCodeCheckbox>
+
+			{/* The SDK honors the API choice only on the built-in provider; custom
+			    OpenAI-compatible providers reuse this component but keep their own
+			    providers.json protocol. */}
+			{isOpenAiProvider && (
+				<div style={{ marginTop: 10 }}>
+					<DropdownContainer className="dropdown-container" style={{ position: "inherit" }}>
+						<label htmlFor="openai-compatible-api-protocol">
+							<span style={{ fontWeight: 500 }}>API</span>
+						</label>
+						<VSCodeDropdown
+							aria-label="API"
+							id="openai-compatible-api-protocol"
+							onChange={(event) => handleApiProtocolChange((event.target as HTMLSelectElement).value)}
+							style={{ minWidth: 130, position: "relative" }}
+							value={selectedApiProtocol}>
+							{API_PROTOCOL_OPTIONS.map((option) => (
+								<VSCodeOption key={option.value} value={option.value}>
+									{option.label}
+								</VSCodeOption>
+							))}
+						</VSCodeDropdown>
+					</DropdownContainer>
+					<p
+						style={{
+							fontSize: "12px",
+							marginTop: 3,
+							color: "var(--vscode-descriptionForeground)",
+						}}>
+						Auto uses the Responses API for GPT-5 and later and o-series models on OpenAI and Azure OpenAI, and falls
+						back to Chat Completions with a warning if the endpoint doesn't support it.
+					</p>
+				</div>
+			)}
 
 			<div
 				onClick={() => setModelConfigurationSelected((val) => !val)}

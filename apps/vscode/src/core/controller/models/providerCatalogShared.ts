@@ -1,4 +1,5 @@
 import type { ApiConfiguration, ModelInfo } from "@shared/api"
+import { parseOpenAICompatibleApiProtocol } from "@/sdk/model-catalog/api-protocol"
 import { filterChatModelMap, resolveChatModelDefault } from "@/sdk/model-catalog/chat-models"
 import type {
 	EffectiveProviderConfig,
@@ -242,6 +243,7 @@ export function toRedactedProviderConfigResponse(
 		aws: toRedactedAwsProviderConfigProto(config.aws),
 		gcp: toRedactedGcpProviderConfigProto(config.gcp),
 		contextWindow: config.contextWindow,
+		apiProtocol: config.apiProtocol,
 	})
 }
 
@@ -264,6 +266,11 @@ export function toProviderConfigPatch(protoPatch: WriteProviderConfigPatch | und
 		// A zero context window over the wire means "clear the setting".
 		...(protoPatch.contextWindow !== undefined
 			? { contextWindow: protoPatch.contextWindow > 0 ? protoPatch.contextWindow : null }
+			: {}),
+		// "auto" (or any value other than an explicit protocol) over the wire
+		// means "clear the setting", i.e. Auto.
+		...(protoPatch.apiProtocol !== undefined
+			? { apiProtocol: parseOpenAICompatibleApiProtocol(protoPatch.apiProtocol) ?? null }
 			: {}),
 		...(protoPatch.accessToken !== undefined || protoPatch.refreshToken !== undefined || protoPatch.accountId !== undefined
 			? {

@@ -17,6 +17,27 @@ describe("hydrateSessionMessages", () => {
 			]),
 		).toEqual([{ kind: "error", text: "Provider unavailable" }]);
 	});
+	it("skips thinking blocks that carry only replay data", () => {
+		expect(
+			hydrateSessionMessages([
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "Plan" },
+						{
+							type: "thinking",
+							thinking: "",
+							openaiResponses: { itemId: "rs_2", encryptedContent: "enc" },
+						},
+						{ type: "text", text: "Done" },
+					],
+				},
+			]),
+		).toEqual([
+			expect.objectContaining({ kind: "reasoning", text: "Plan" }),
+			expect.objectContaining({ kind: "assistant_text", text: "Done" }),
+		]);
+	});
 	it("renders regular user messages", () => {
 		const messages = [
 			{

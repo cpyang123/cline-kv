@@ -2,6 +2,7 @@ import type {
 	GatewayProviderContext,
 	GatewayStreamRequest,
 	GeneratedMedia,
+	ModelNoticeKind,
 	ModelTool,
 	ModelToolName,
 } from "@cline/shared";
@@ -22,6 +23,18 @@ export interface BuiltModelTool {
 }
 
 export type BuiltModelTools = Partial<Record<ModelToolName, BuiltModelTool>>;
+
+/**
+ * Something a vendor wants the user to know about how a request was served
+ * (see {@link ModelNoticeKind}). Vendors queue notices while serving a
+ * request; the gateway drains them through `takeNotices` and emits them as
+ * `notice` model events before the request's content.
+ */
+export interface ProviderNotice {
+	kind: ModelNoticeKind;
+	message: string;
+	metadata?: Record<string, unknown>;
+}
 
 export interface ProviderFactoryResult {
 	operations: {
@@ -53,6 +66,13 @@ export interface ProviderFactoryResult {
 		request: GatewayStreamRequest,
 		context: GatewayProviderContext,
 	) => Partial<CallSettings>;
+	/**
+	 * Return and clear the notices queued while serving requests through this
+	 * module. A module is created per stream, so these belong to the current
+	 * request. The gateway calls it repeatedly while the stream runs and once
+	 * more when it ends.
+	 */
+	takeNotices?: () => ProviderNotice[];
 }
 
 export interface AiSdkStreamPart {

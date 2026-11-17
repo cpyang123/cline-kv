@@ -8,6 +8,8 @@ import {
 	isKimiK26Family as isKimiK26FamilyFact,
 	isMiniMaxM3Model,
 	isMoonshotKimiModelIdFallback,
+	isOpenAIChatVariantModelId,
+	isOpenAIReasoningEraModelId,
 	providerReasoningRouteMatches,
 	resolveModelFamily,
 } from "../model-facts";
@@ -181,6 +183,47 @@ const openAiAdapterRule: ProviderOptionRule = {
 			strictJsonSchema: false,
 			...(["openai", "openai-native"].includes(input.request.providerId)
 				? buildOpenAINativeProviderOptions()
+				: {}),
+		},
+	}),
+};
+
+function isOpenAIResponsesReasoningModel(
+	input: ProviderOptionMatchInput,
+): boolean {
+	if (input.context.model.capabilities?.includes("reasoning")) {
+		return true;
+	}
+	const modelId = input.request.modelId;
+	return (
+		isOpenAIReasoningEraModelId(modelId) && !isOpenAIChatVariantModelId(modelId)
+	);
+}
+
+const openAiCompatibleResponsesRule: ProviderOptionRule = {
+	id: "adapter.openai-compatible.responses",
+	phase: "adapter",
+	description:
+		"OpenAI-compatible providers that route to the Responses API get the openai bucket its adapter reads: stateless requests that return encrypted reasoning for replay, non-strict tool schemas. The chat adapter ignores this bucket.",
+	applies: (input) =>
+		input.target === "openai-compatible" &&
+		input.context.provider.metadata?.openaiResponses === "auto" &&
+		input.context.config.options?.apiProtocol !== "openai-chat",
+	build: (input) => ({
+		openai: {
+			// Nothing is kept on the resource: reasoning travels back in the
+			// request as encrypted content, so resumed sessions and other
+			// deployments do not depend on server-side retention.
+			store: false,
+			strictJsonSchema: false,
+			// The adapter recognizes reasoning models by id; deployment names
+			// it cannot classify need the explicit flag. Non-reasoning models
+			// reject the encrypted-content include, so both are gated.
+			...(isOpenAIResponsesReasoningModel(input)
+				? {
+						include: ["reasoning.encrypted_content"],
+						forceReasoning: true,
+					}
 				: {}),
 		},
 	}),
@@ -547,6 +590,7 @@ export const PROVIDER_OPTION_RULES: ReadonlyArray<ProviderOptionRule> = [
 	routedAnthropicProviderFallbackRule,
 	directGoogleProviderRule,
 	openAiAdapterRule,
+	openAiCompatibleResponsesRule,
 	openAiCodexRule,
 	genericProviderFanoutRule,
 	clineGatewayReasoningRule,

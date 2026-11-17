@@ -79,6 +79,7 @@ enum ClineSay {
   PLAN_COMPLETION_RESULT = 38;
   CLOUD_PROVISIONING = 39;
   KNOWLEDGE_VAULT = 40;
+  PROVIDER_NOTICE = 41;
 }
 
 // Enum for ClineSayTool tool types

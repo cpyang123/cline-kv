@@ -289,6 +289,21 @@ export function isOpenAIReasoningEraModelId(
 	);
 }
 
+/**
+ * Chat-tuned OpenAI variants (`gpt-5-chat-latest`, Azure `gpt-5-chat`) match
+ * the reasoning-era id pattern but are not reasoning models: they reject
+ * reasoning options and the encrypted-reasoning include.
+ */
+const OPENAI_CHAT_VARIANT_MODEL_ID_PATTERN =
+	/(^|[^a-z0-9])gpt-?\d+(?:\.\d+)?-chat(?=$|[^a-z0-9])/;
+
+export function isOpenAIChatVariantModelId(
+	modelId: string | undefined,
+): boolean {
+	const normalized = normalizeRoutingValue(modelId);
+	return !!normalized && OPENAI_CHAT_VARIANT_MODEL_ID_PATTERN.test(normalized);
+}
+
 export function resolveGeminiThinkingMode(input: {
 	request: Pick<GatewayStreamRequest, "modelId">;
 	context: GatewayProviderContext;

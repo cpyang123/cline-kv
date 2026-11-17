@@ -4,7 +4,8 @@ import type { Message as SdkMessage } from "@cline/llms"
 import type { AgentEvent, MessageWithMetadata } from "@cline/shared"
 import { COMMAND_OUTPUT_STRING } from "@shared/combineCommandSequences"
 import type { ClineAskUseMcpServer, ClineSayTool } from "@shared/ExtensionMessage"
-import { describe, expect, it } from "vitest"
+import { ShowMessageType } from "@shared/proto/host/window"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { getDesktopDir } from "@/utils/path"
 import {
 	buildToolApprovalAskMessage,
@@ -14,6 +15,11 @@ import {
 	sdkMessagesToClineMessages,
 	translateSessionEvent,
 } from "./message-translator"
+import { resetProviderNoticeToastsForTests } from "./provider-notice"
+
+const hostMocks = vi.hoisted(() => ({ showMessage: vi.fn(async () => ({})) }))
+
+vi.mock("@/hosts/host-provider", () => ({ HostProvider: { window: { showMessage: hostMocks.showMessage } } }))
 
 // ---------------------------------------------------------------------------
 // MessageTranslatorState
@@ -2139,6 +2145,77 @@ describe("translateSessionEvent — agent_event notice", () => {
 		expect(result.messages).toHaveLength(1)
 		expect(result.messages[0].say).toBe("info")
 		expect(result.messages[0].text).toBe("some-future-status")
+	})
+
+	describe("provider warnings", () => {
+		const responsesUnavailable =
+			"example.openai.azure.com doesn't support the Responses API for gpt-6-luna, so Cline is using Chat Completions instead."
+
+		beforeEach(() => {
+			hostMocks.showMessage.mockClear()
+			resetProviderNoticeToastsForTests()
+		})
+
+		it.each([
+			"responses_unavailable",
+			"reasoning_disabled_for_tools",
+			"reasoning_replay_dropped",
+		])("renders a %s status notice as a warning row", (kind) => {
+			const state = new MessageTranslatorState()
+			const result = translateSessionEvent(
+				noticeEvent("The request was served differently.", {
+					kind,
+					modelId: "gpt-6-luna",
+					endpointHost: "example.openai.azure.com",
+					apiProtocol: "auto",
+				}),
+				state,
+			)
+
+			expect(result.messages).toHaveLength(1)
+			expect(result.messages[0]).toMatchObject({
+				type: "say",
+				say: "provider_notice",
+				text: "The request was served differently.",
+				partial: false,
+			})
+		})
+
+		it("shows the toast once per kind and model for the whole process", () => {
+			const metadata = { kind: "responses_unavailable", modelId: "gpt-6-luna", endpointHost: "example.openai.azure.com" }
+
+			// Two sessions (e.g. two tasks) each announce the fallback once.
+			for (const state of [new MessageTranslatorState(), new MessageTranslatorState()]) {
+				const result = translateSessionEvent(noticeEvent(responsesUnavailable, metadata), state)
+				expect(result.messages.map((message) => message.say)).toEqual(["provider_notice"])
+			}
+
+			expect(hostMocks.showMessage).toHaveBeenCalledTimes(1)
+			expect(hostMocks.showMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: ShowMessageType.WARNING, message: responsesUnavailable }),
+			)
+
+			// A different model or kind gets its own toast.
+			translateSessionEvent(
+				noticeEvent(responsesUnavailable, { ...metadata, modelId: "gpt-6-sol" }),
+				new MessageTranslatorState(),
+			)
+			translateSessionEvent(
+				noticeEvent("reasoning off", { kind: "reasoning_disabled_for_tools", modelId: "gpt-6-luna" }),
+				new MessageTranslatorState(),
+			)
+			expect(hostMocks.showMessage).toHaveBeenCalledTimes(3)
+		})
+
+		it("keeps other status notices as info rows without a toast", () => {
+			const result = translateSessionEvent(
+				noticeEvent("some-status", { kind: "something_new" }),
+				new MessageTranslatorState(),
+			)
+
+			expect(result.messages[0].say).toBe("info")
+			expect(hostMocks.showMessage).not.toHaveBeenCalled()
+		})
 	})
 
 	it("finalizes a dangling compaction divider as failed when the turn errors", () => {

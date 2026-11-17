@@ -59,6 +59,7 @@ import { KnowledgeVaultRow } from "./KnowledgeVaultRow"
 import { MarkdownRow } from "./MarkdownRow"
 import NewTaskPreview from "./NewTaskPreview"
 import PlanCompletionOutputRow from "./PlanCompletionOutputRow"
+import { ProviderNoticeRow } from "./ProviderNoticeRow"
 import QuoteButton from "./QuoteButton"
 import ReportBugPreview from "./ReportBugPreview"
 import { RequestStartRow } from "./RequestStartRow"
@@ -1047,6 +1048,8 @@ export const ChatRowContent = memo(
 						return <CompactionRow message={message} />
 					case "knowledge_vault":
 						return <KnowledgeVaultRow message={message} />
+					case "provider_notice":
+						return <ProviderNoticeRow message={message} />
 					case "cloud_provisioning":
 						return <CloudProvisioningRow active={lastModifiedMessage?.ts === message.ts} message={message} />
 					default:

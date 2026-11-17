@@ -15,6 +15,7 @@ import { getProviderModelIdKey } from "@shared/storage/provider-keys"
 import { isSecretKey, isSettingsKey, type SecretKey, type SettingsKey } from "@shared/storage/state-keys"
 import { StateManager } from "@/core/storage/StateManager"
 import { getProviderSettingsManager } from "../provider-migration"
+import { parseOpenAICompatibleApiProtocol, storesOpenAICompatibleApiProtocol } from "./api-protocol"
 import type {
 	Disposable,
 	EffectiveProviderConfig,
@@ -654,6 +655,19 @@ function writeProviderSettingsFields(providerId: ProviderId, patch: ProviderConf
 			next.contextWindow = Math.floor(contextWindow)
 		} else {
 			delete next.contextWindow
+		}
+	}
+
+	// The OpenAI Compatible API choice is the providers.json `protocol` key,
+	// which every build already parses: an explicit protocol is stored, Auto
+	// (null or any other value) removes the key. Custom providers keep their
+	// own collection `protocol` untouched.
+	if ("apiProtocol" in patch && storesOpenAICompatibleApiProtocol(providerId)) {
+		const apiProtocol = parseOpenAICompatibleApiProtocol(patch.apiProtocol)
+		if (apiProtocol) {
+			next.protocol = apiProtocol
+		} else {
+			delete next.protocol
 		}
 	}
 

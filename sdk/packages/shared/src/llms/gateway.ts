@@ -147,6 +147,17 @@ export interface GatewayProviderMetadata {
 	 */
 	toolTransport?: "prompt" | "auto";
 	/**
+	 * The provider can serve OpenAI models through the Responses API as well
+	 * as Chat Completions, chosen per request by the OpenAI-compatible
+	 * vendor's protocol router (`vendors/responses-router.ts` in
+	 * `@cline/llms`). `auto`: the provider's `apiProtocol` option picks the
+	 * protocol; when it is unset, the Responses API is used for OpenAI
+	 * reasoning-era models on OpenAI and Azure OpenAI hosts. Requests fall back
+	 * to Chat Completions when the endpoint cannot serve `/responses`.
+	 * Providers without this flag always use Chat Completions.
+	 */
+	openaiResponses?: "auto";
+	/**
 	 * The endpoint closes every streaming response this many milliseconds
 	 * after it started, whatever is still flowing (GoodVision's test host:
 	 * about 30 s). Streams are ended by the client a little earlier with a

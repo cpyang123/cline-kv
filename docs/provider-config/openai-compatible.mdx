@@ -26,6 +26,7 @@ You'll find these settings in the Cline settings panel (click the ⚙️ icon):
 -   **API Key:** Enter your API key from the provider.
 -   **Model:** Choose or enter the model ID.
 -   **Use Azure Identity Authentication:** Check the box to authenticate with your Azure managed identity (Note that this will not trigger the authentication, it will use the existing one (e.g., "az login"))
+-   **API:** Auto, Chat Completions or Responses. See [API: Chat Completions or Responses](#api-chat-completions-or-responses) below.
 -   **Model Configuration:** This section allows you to customize advanced parameters for the model, such as:
     -   Max Output Tokens
     -   Context Window size
@@ -35,6 +36,24 @@ You'll find these settings in the Cline settings panel (click the ⚙️ icon):
     -   Output Price (per token/million tokens)
 
 **Note:** If you are using a different OpenAI-compatible provider (such as Together AI, Anyscale, etc.), the available model IDs will differ. Always refer to your specific provider's documentation for their supported model names and any unique configuration details.
+
+### API: Chat Completions or Responses
+
+The **API** setting picks which OpenAI API the built-in OpenAI Compatible provider calls. Custom OpenAI-compatible providers don't have it.
+
+-   **Auto** (default): Cline uses the Responses API (`/responses`) for GPT-5 and later and o-series models, such as `gpt-6-luna` or `o3`, when the base URL is OpenAI (`api.openai.com`) or Azure OpenAI (`*.openai.azure.com`, `*.cognitiveservices.azure.com`, `*.services.ai.azure.com`) and an API key is set. Everything else uses Chat Completions (`/chat/completions`). Azure base URLs of the form `.../openai/deployments/<name>` stay on Chat Completions; use the `https://<resource>.openai.azure.com/openai/v1` base URL to get the Responses API.
+-   **Chat Completions**: always use `/chat/completions`.
+-   **Responses**: try `/responses` first, for example for a model or endpoint Auto doesn't recognize. If the endpoint doesn't serve it, Cline falls back as described below.
+
+Why it matters: some newer models, such as GPT-6 on Azure OpenAI, refuse tool calls together with reasoning on Chat Completions. On the Responses API they can use both, and Cline passes the model's reasoning on from one step of a task to the next.
+
+When the endpoint or model can't do what was asked, Cline falls back instead of failing, and tells you when it does. Other errors, such as a wrong API key or an exhausted quota, are shown as usual. Each warning appears as a yellow row in the chat (once per task, and again after switching between Plan and Act) and, in VS Code, as a notification the first time it happens for a model:
+
+-   **The endpoint doesn't support the Responses API:** Cline resends the request through Chat Completions and keeps using Chat Completions for that endpoint and model for about an hour. Azure deployment URLs (`.../openai/deployments/<name>`) never serve it; use the `https://<resource>.openai.azure.com/openai/v1` base URL instead.
+-   **The model refuses tools with reasoning on Chat Completions:** Cline sends its tool requests with reasoning turned off. If your endpoint serves the Responses API, set the API to Responses to keep reasoning on.
+-   **The endpoint rejects the model's earlier reasoning:** Cline resends the request without it.
+
+The CLI prints the same warnings as status lines. The setting is stored as `"protocol"` on the `openai-compatible` entry in `~/.cline/data/settings/providers.json` (`"openai-chat"` or `"openai-responses"`; no value means Auto), so the CLI uses it too. A change applies from the next task.
 
 ### v0 (Vercel SDK) in Cline:
 

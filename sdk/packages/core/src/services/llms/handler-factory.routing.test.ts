@@ -70,10 +70,34 @@ describe("core agent per-model protocol routing", () => {
 	});
 });
 
+describe("core agent OpenAI Compatible API protocol routing", () => {
+	const azureBaseUrl = "https://example.openai.azure.com/openai/v1";
+
+	it.each([
+		["openai-chat", "chat/completions", "messages"],
+		["openai-responses", "responses", "input"],
+	] as const)("routes providers.json protocol %s to %s", async (protocol, endpoint, inputField) => {
+		// providers.json shape the extension's API dropdown writes. Before the
+		// fix "openai-responses" rerouted to openai-native, whose registration
+		// still resolved to the chat client, so the setting never took effect.
+		const providerConfig = toProviderConfig({
+			provider: "openai-compatible",
+			model: "gpt-6-luna",
+			apiKey: "test-key",
+			baseUrl: azureBaseUrl,
+			protocol,
+		});
+		expect(providerConfig.routingProviderId).toBeUndefined();
+		expect(providerConfig.apiProtocol).toBe(protocol);
+		await expectEndpoint(providerConfig, endpoint, inputField, azureBaseUrl);
+	});
+});
+
 async function expectEndpoint(
 	providerConfig: ReturnType<typeof toProviderConfig>,
 	endpoint: string,
 	inputField: string,
+	baseUrl = "https://opencode.ai/inference/go/v1",
 ) {
 	// Exercise the real gateway and HTTP serializers, but stop at the network
 	// boundary. A non-retryable response keeps this test offline and deterministic.
@@ -113,7 +137,7 @@ async function expectEndpoint(
 	);
 	expect(fetchMock).toHaveBeenCalledTimes(1);
 	const [url, init] = fetchMock.mock.calls[0];
-	expect(String(url)).toBe(`https://opencode.ai/inference/go/v1/${endpoint}`);
+	expect(String(url)).toBe(`${baseUrl}/${endpoint}`);
 	const body = JSON.parse(String(init?.body));
 	expect(body[inputField]).toBeDefined();
 	if (inputField !== "contents") {

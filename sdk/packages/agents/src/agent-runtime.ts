@@ -15,6 +15,7 @@ import type {
 	AgentModelFinishReason,
 	AgentModelRequest,
 	AgentModelToolActivity,
+	AgentReasoningPart,
 	AgentRunResult,
 	AgentRuntimeEvent,
 	AgentRuntimeHooks,
@@ -599,6 +600,11 @@ export class AgentRuntime {
 	private maxTokensRecoveryCount = 0;
 	/** One automatic recovery attempt per run for max-tokens-truncated turns. */
 	private maxTokensRecoveryAttempted = false;
+	/**
+	 * Model notices already announced, by kind and model id. Kept across runs:
+	 * a session announces each once (see `emitModelNotice`).
+	 */
+	private readonly announcedModelNotices = new Set<string>();
 	private initialization?: Promise<void>;
 	private abortController?: AbortController;
 	private modelSteerController?: AbortController;
@@ -854,7 +860,7 @@ export class AgentRuntime {
 				this.resetLastError();
 				const { message, finishReason, interrupted } =
 					await this.generateAssistantMessageWithProviderRetry();
-				if (interrupted && message.content.length === 0) {
+				if (interrupted && !hasOutputContent(message)) {
 					await this.emit({
 						type: "turn-finished",
 						snapshot: this.snapshot(),
@@ -866,7 +872,9 @@ export class AgentRuntime {
 				if (finishReason === "aborted") {
 					throw this.normalizeAbortError();
 				}
-				if (message.content.length === 0) {
+				// Reasoning items that carried only replay metadata are not output:
+				// such a turn is as empty as one with no content at all.
+				if (!hasOutputContent(message)) {
 					// Attribution is set immediately before each throw: nothing can
 					// interleave between a synchronous set-and-throw and the
 					// run-level catch, so `sdk.error` can never pick up a reason
@@ -1578,7 +1586,7 @@ export class AgentRuntime {
 			// transcript shows what happened (the loop records such a turn before
 			// failing, too). Only a retry that produced nothing is dropped.
 			if (
-				retry.message.content.length > 0 ||
+				hasOutputContent(retry.message) ||
 				this.hasModelToolActivity(retry.message)
 			) {
 				await this.recordAssistantMessage(retry.message, retry.finishReason);
@@ -1591,7 +1599,7 @@ export class AgentRuntime {
 		// misleading error. Keep the truncated turn, exactly as when there was
 		// nothing to compact, and let the loop surface the max-tokens error.
 		if (
-			retry.message.content.length === 0 &&
+			!hasOutputContent(retry.message) &&
 			!this.hasModelToolActivity(retry.message)
 		) {
 			return first;
@@ -1810,6 +1818,8 @@ export class AgentRuntime {
 		let requestId: string | undefined;
 		let accumulatedText = "";
 		let accumulatedReasoning = "";
+		const reasoningItems = new Map<string, AgentReasoningPart>();
+		const reasoningItemParts = new WeakSet<AgentReasoningPart>();
 
 		for await (const event of stream) {
 			if (steerController.signal.aborted) break;
@@ -1853,22 +1863,40 @@ export class AgentRuntime {
 				}
 				case "reasoning-delta": {
 					accumulatedReasoning += event.text;
+					// Provider reasoning items (OpenAI Responses) each keep their own
+					// part so they can be replayed item by item; a delta may only
+					// carry metadata for an item already in progress.
 					const last = sequence.at(-1);
-					if (last?.type === "part" && last.part.type === "reasoning") {
-						last.part.text += event.text;
-						last.part.redacted = event.redacted ?? last.part.redacted;
-						last.part.metadata = event.metadata ?? last.part.metadata;
+					const existing =
+						event.itemId !== undefined
+							? reasoningItems.get(event.itemId)
+							: last?.type === "part" &&
+									last.part.type === "reasoning" &&
+									!reasoningItemParts.has(last.part)
+								? last.part
+								: undefined;
+					if (existing) {
+						existing.text += event.text;
+						existing.redacted = event.redacted ?? existing.redacted;
+						existing.metadata = mergeReasoningMetadata(
+							existing.metadata,
+							event.metadata,
+						);
 					} else {
-						sequence.push({
-							type: "part",
-							part: {
-								type: "reasoning",
-								text: event.text,
-								redacted: event.redacted,
-								metadata: event.metadata,
-							},
-						});
+						const part: AgentReasoningPart = {
+							type: "reasoning",
+							text: event.text,
+							redacted: event.redacted,
+							metadata: event.metadata,
+						};
+						if (event.itemId !== undefined) {
+							reasoningItems.set(event.itemId, part);
+							reasoningItemParts.add(part);
+						}
+						sequence.push({ type: "part", part });
 					}
+					// Metadata-only deltas have nothing to show.
+					if (!event.text) break;
 					await this.emit({
 						type: "assistant-reasoning-delta",
 						snapshot: this.snapshot(),
@@ -1989,6 +2017,10 @@ export class AgentRuntime {
 					});
 					break;
 				}
+				case "notice": {
+					await this.emitModelNotice(event);
+					break;
+				}
 				case "usage": {
 					// Record the provider's own input-token count for this request so
 					// the prepare-turn pipeline can trigger compaction on real usage
@@ -2106,6 +2138,26 @@ export class AgentRuntime {
 		return { message, finishReason, interrupted };
 	}
 
+	/**
+	 * Announce a model-layer notice (e.g. a protocol fallback) as a status
+	 * notice. Vendors repeat a notice on every affected request; the user
+	 * needs it once per session for each kind and model.
+	 */
+	private async emitModelNotice(
+		event: Extract<AgentModelEvent, { type: "notice" }>,
+	): Promise<void> {
+		const modelId = event.metadata?.modelId;
+		const key = `${event.kind}\u0000${typeof modelId === "string" ? modelId : ""}`;
+		if (this.announcedModelNotices.has(key)) return;
+		this.announcedModelNotices.add(key);
+		await this.emit({
+			type: "status-notice",
+			snapshot: this.snapshot(),
+			message: event.message,
+			metadata: { ...event.metadata, kind: event.kind },
+		});
+	}
+
 	private async *openTaskLifecycleStream(
 		request: AgentModelRequest,
 		getTaskLifecycleDurationMs: () => number | undefined,
@@ -2136,7 +2188,8 @@ export class AgentRuntime {
 		let receivedFirstChunk = false;
 		try {
 			for await (const event of stream) {
-				if (!receivedFirstChunk) {
+				// Notices describe how the request was served, not model output.
+				if (!receivedFirstChunk && event.type !== "notice") {
 					receivedFirstChunk = true;
 					phase = "first_chunk_received";
 					this.captureTaskLifecycle(TASK_FIRST_CHUNK_RECEIVED_EVENT, {
@@ -2857,6 +2910,53 @@ function mergeToolMetadata(current: unknown, patch: unknown): unknown {
 		...(current as Record<string, unknown>),
 		...patch,
 	};
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Merge a reasoning delta's metadata into its part. Non-null values win and
+ * nested records (e.g. `openaiResponses`) merge the same way one level down:
+ * an OpenAI reasoning item's id arrives with its first delta and its
+ * encrypted content only with its last, so neither may erase the other.
+ */
+function mergeReasoningMetadata(current: unknown, patch: unknown): unknown {
+	if (patch === undefined || patch === null) return current;
+	if (!isPlainRecord(current) || !isPlainRecord(patch)) return patch;
+	const merged: Record<string, unknown> = { ...current };
+	for (const [key, value] of Object.entries(patch)) {
+		if (value === undefined || value === null) continue;
+		const previous = merged[key];
+		merged[key] =
+			isPlainRecord(previous) && isPlainRecord(value)
+				? {
+						...previous,
+						...Object.fromEntries(
+							Object.entries(value).filter(
+								([, nested]) => nested !== undefined && nested !== null,
+							),
+						),
+					}
+				: value;
+	}
+	return merged;
+}
+
+/**
+ * Text-free reasoning only carries provider replay metadata (an OpenAI
+ * Responses item whose summary was empty); it is not model output.
+ */
+function isMetadataOnlyReasoning(part: AgentMessagePart): boolean {
+	return (
+		part.type === "reasoning" && part.text === "" && part.redacted !== true
+	);
+}
+
+/** Whether a turn produced anything beyond metadata-only reasoning. */
+function hasOutputContent(message: { content: AgentMessagePart[] }): boolean {
+	return !message.content.every(isMetadataOnlyReasoning);
 }
 
 function parseToolInput(assembly: PendingToolAssembly): {

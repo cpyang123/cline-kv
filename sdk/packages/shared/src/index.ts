@@ -201,6 +201,7 @@ export type {
 	Message,
 	MessageRole,
 	MessageWithMetadata,
+	OpenAIResponsesReasoningMetadata,
 	RedactedThinkingContent,
 	TextContent,
 	ThinkingContent,

@@ -1008,8 +1008,14 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		defaultModelId: "gpt-4o",
 		apiKeyEnv: ["OPENAI_API_KEY"],
 		defaults: { baseUrl: "https://api.openai.com/v1" },
-		// Self-hosted endpoints (vLLM, llama.cpp, LM Studio) run without a key.
-		metadata: { apiKeyOptional: true },
+		metadata: {
+			// Self-hosted endpoints (vLLM, llama.cpp, LM Studio) run without a key.
+			apiKeyOptional: true,
+			// OpenAI and Azure OpenAI reasoning models go through the Responses
+			// API (Chat Completions refuses tools with reasoning for some), with
+			// a fallback to Chat Completions; see vendors/responses-router.ts.
+			openaiResponses: "auto",
+		},
 	},
 	cline,
 	clinePass,

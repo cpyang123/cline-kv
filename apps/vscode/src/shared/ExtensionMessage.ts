@@ -288,6 +288,7 @@ export type ClineSay =
 	| "compaction" // context compaction progress/result divider
 	| "cloud_provisioning" // cloud sandbox start/resume progress
 	| "knowledge_vault" // Knowledge Vault memory recalled into / written from this task
+	| "provider_notice" // warning: the model API request was served differently (e.g. Responses -> Chat Completions fallback)
 
 /** Payload of a `knowledge_vault` say message (JSON in `text`). */
 export interface ClineKnowledgeVaultInfo {

@@ -58,6 +58,44 @@ describe("buildSdkProviderConfig", () => {
 		expect(mocks.providerSettingsManager.getProviderSettings).toHaveBeenCalledWith("cline")
 	})
 
+	it.each([
+		["openai-responses", { apiProtocol: "openai-responses" }],
+		["openai-chat", { apiProtocol: "openai-chat" }],
+	])("forwards the OpenAI Compatible API setting %s to side tasks", (protocol, expected) => {
+		mocks.providerSettingsManager.getProviderSettings.mockImplementation((providerId: string) =>
+			providerId === "openai-compatible" ? { provider: "openai-compatible", apiKey: "azure-key", protocol } : undefined,
+		)
+
+		const providerConfig = buildSdkProviderConfig(
+			{
+				actModeApiProvider: "openai",
+				openAiApiKey: "azure-key",
+				openAiBaseUrl: "https://res.openai.azure.com/openai/v1",
+				actModeOpenAiModelId: "gpt-6-luna",
+			},
+			"act",
+		)
+
+		expect(providerConfig).toMatchObject({ providerId: "openai-compatible", ...expected })
+	})
+
+	it("leaves the API setting unset for Auto and for other providers", () => {
+		mocks.providerSettingsManager.getProviderSettings.mockImplementation((providerId: string) =>
+			providerId === "openai-compatible"
+				? { provider: "openai-compatible", apiKey: "azure-key" }
+				: { provider: providerId, protocol: "openai-responses" },
+		)
+
+		const auto = buildSdkProviderConfig(
+			{ actModeApiProvider: "openai", openAiApiKey: "azure-key", actModeOpenAiModelId: "gpt-6-luna" },
+			"act",
+		)
+		const other = buildSdkProviderConfig({ actModeApiProvider: "v0", actModeV0ModelId: "v0-1.5-md" } as never, "act")
+
+		expect(auto).not.toHaveProperty("apiProtocol")
+		expect(other).not.toHaveProperty("apiProtocol")
+	})
+
 	it("uses provider-specific settings for SDK-backed direct handlers", () => {
 		mocks.providerSettingsManager.getProviderSettings.mockImplementation((providerId: string) => {
 			if (providerId !== "v0") {

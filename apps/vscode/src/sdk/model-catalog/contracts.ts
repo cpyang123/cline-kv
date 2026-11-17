@@ -89,6 +89,14 @@ export interface GcpProviderConfig {
 	readonly region?: string
 }
 
+/**
+ * Wire protocol of the built-in OpenAI Compatible provider, stored as the
+ * providers.json `protocol` key. Absent means Auto: the SDK uses the
+ * Responses API for OpenAI reasoning-era models on OpenAI / Azure OpenAI
+ * hosts and Chat Completions otherwise.
+ */
+export type OpenAICompatibleApiProtocol = "openai-chat" | "openai-responses"
+
 export interface EffectiveProviderConfig {
 	readonly providerId: ProviderId
 	readonly apiKey?: string
@@ -104,6 +112,10 @@ export interface EffectiveProviderConfig {
 	 * vendor boundary.
 	 */
 	readonly contextWindow?: number
+	/**
+	 * OpenAI Compatible API protocol (built-in provider only); undefined is Auto.
+	 */
+	readonly apiProtocol?: OpenAICompatibleApiProtocol
 	/**
 	 * OAuth-style auth bundle (e.g. cline provider's WorkOS token).
 	 * Compatible with `apiKey`; some providers populate both.
@@ -147,6 +159,8 @@ export interface ProviderConfigPatch {
 	readonly aws?: AwsProviderConfig | null
 	readonly gcp?: GcpProviderConfig | null
 	readonly contextWindow?: number | null
+	/** `null` clears the stored protocol, i.e. selects Auto. */
+	readonly apiProtocol?: OpenAICompatibleApiProtocol | null
 	readonly auth?: {
 		readonly accessToken?: string
 		readonly refreshToken?: string

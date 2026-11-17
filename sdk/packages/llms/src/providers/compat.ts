@@ -520,6 +520,7 @@ function buildGatewayConfig(config: ProviderConfig) {
 			customModelBaseId: config.aws?.customModelBaseId,
 			apiVersion: config.azure?.apiVersion,
 			useIdentity: config.azure?.useIdentity,
+			apiProtocol: config.apiProtocol,
 			mode: config.oca?.mode,
 			usePromptCache: config.aws?.usePromptCache ?? config.oca?.usePromptCache,
 			...config.codex,
@@ -544,7 +545,14 @@ function toApiStreamChunk(
 			// event path. The legacy ApiStream contract has no observational tool
 			// event that would not imply caller-owned execution.
 			return undefined;
+		case "notice":
+			// The legacy ApiStream contract has no notice chunk; vendors still
+			// log their notices through the provider logger.
+			return undefined;
 		case "reasoning-delta": {
+			// Text-free deltas only carry replay metadata (OpenAI Responses
+			// reasoning items), which the legacy ApiStream contract cannot use.
+			if (!event.text) return undefined;
 			const metadata = event.metadata as Record<string, unknown> | undefined;
 			return {
 				type: "reasoning",

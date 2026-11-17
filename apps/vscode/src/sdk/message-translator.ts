@@ -54,6 +54,7 @@ import {
 } from "../services/error/ClineError"
 import { MessageIdMinter } from "./message-id-minter"
 import { describeCredentialRejectedError, describeMissingCredentialError } from "./provider-credential-error"
+import { parseProviderNotice, showProviderNoticeToastOnce } from "./provider-notice"
 import { extractPersistedHookContextChips, isSyntheticSdkUserMessage, isSyntheticUserPrompt } from "./sdk-user-message-mapping"
 import { isDeniedToolApprovalMistake, isKnownToolApprovalDenial } from "./tool-approval-denial"
 
@@ -1927,6 +1928,22 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 					break
 				}
 				if (INTERNAL_STATUS_NOTICES.has(event.message ?? "")) {
+					break
+				}
+				// Provider warnings (protocol fallback, reasoning turned off or
+				// dropped) change how the model is served, so they get a
+				// warning-styled row plus a once-per-process toast. The SDK
+				// already announces each kind once per session and model.
+				const providerNotice = parseProviderNotice(event.message, event.metadata)
+				if (providerNotice) {
+					messages.push({
+						ts: state.nextTs(),
+						type: "say",
+						say: "provider_notice",
+						text: providerNotice.message,
+						partial: false,
+					})
+					showProviderNoticeToastOnce(providerNotice)
 					break
 				}
 			}

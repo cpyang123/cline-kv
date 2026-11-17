@@ -554,6 +554,58 @@ describe("createProviderConfigStore", () => {
 		})
 	})
 
+	// The settings UI's "API" dropdown. providers.json `protocol` is the store
+	// the SDK reads (absent = Auto); there is no legacy state key.
+	it("persists the OpenAI Compatible API protocol as providers.json protocol and clears it for Auto", async () => {
+		const { createProviderConfigStore } = await import("./store")
+		mocks.setProviderSettings({
+			"openai-compatible": { provider: "openai-compatible", baseUrl: "https://example.openai.azure.com/openai/v1" },
+		})
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openai")
+
+		expect(store.write(providerId, { apiProtocol: "openai-responses" }).apiProtocol).toBe("openai-responses")
+		expect(mocks.getSavedProviderSettings("openai-compatible")).toEqual({
+			provider: "openai-compatible",
+			baseUrl: "https://example.openai.azure.com/openai/v1",
+			protocol: "openai-responses",
+		})
+		expect(mocks.getSaveProviderSettingsMock().mock.calls.at(-1)?.[1]).toEqual({
+			setLastUsed: false,
+			tokenSource: undefined,
+		})
+
+		store.write(providerId, { apiProtocol: "openai-chat" })
+		expect(store.read(providerId).apiProtocol).toBe("openai-chat")
+
+		store.write(providerId, { apiProtocol: null })
+		expect(mocks.getSavedProviderSettings("openai-compatible")).not.toHaveProperty("protocol")
+		expect(store.read(providerId)).not.toHaveProperty("apiProtocol")
+	})
+
+	it("reads only OpenAI wire protocols back as the API protocol", async () => {
+		const { createProviderConfigStore } = await import("./store")
+		mocks.setProviderSettings({
+			"openai-compatible": { provider: "openai-compatible", protocol: "anthropic" },
+		})
+
+		expect(createProviderConfigStore().read(parseProviderId("openai"))).not.toHaveProperty("apiProtocol")
+	})
+
+	it("never touches a custom provider's own collection protocol", async () => {
+		const { createProviderConfigStore } = await import("./store")
+		mocks.setProviderSettings({
+			"custom-openai": { provider: "custom-openai", protocol: "openai-responses" },
+		})
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("custom-openai")
+
+		store.write(providerId, { apiProtocol: null })
+
+		expect(mocks.getSavedProviderSettings("custom-openai")).toMatchObject({ protocol: "openai-responses" })
+		expect(store.read(providerId)).not.toHaveProperty("apiProtocol")
+	})
+
 	it("lazily migrates meaningful legacy custom-model metadata once", async () => {
 		const legacyModelInfo = {
 			name: "Legacy Custom",

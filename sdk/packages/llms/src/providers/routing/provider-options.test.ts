@@ -401,6 +401,104 @@ describe("mergeProviderOptionPatches", () => {
 	});
 });
 
+describe("composeAiSdkProviderOptions: OpenAI Responses routing", () => {
+	const ROUTED_METADATA = { openaiResponses: "auto" as const };
+
+	function routedOptions(input: {
+		modelId: string;
+		capabilities?: GatewayProviderContext["model"]["capabilities"];
+		metadata?: GatewayProviderContext["provider"]["metadata"];
+		apiProtocol?: string;
+		providerId?: string;
+	}) {
+		const providerId = input.providerId ?? "openai-compatible";
+		const context = makeContext({
+			providerId,
+			modelId: input.modelId,
+			capabilities: input.capabilities,
+			metadata: input.metadata ?? ROUTED_METADATA,
+		});
+		return composeAiSdkProviderOptions(
+			makeRequest({
+				providerId,
+				modelId: input.modelId,
+				reasoning: { effort: "medium" },
+			}),
+			input.apiProtocol
+				? {
+						...context,
+						config: {
+							...context.config,
+							options: { apiProtocol: input.apiProtocol },
+						},
+					}
+				: context,
+		);
+	}
+
+	it("writes the stateless Responses options for reasoning-era models", () => {
+		const result = routedOptions({ modelId: "gpt-6-luna" });
+
+		expect(result.openai).toEqual({
+			store: false,
+			strictJsonSchema: false,
+			include: ["reasoning.encrypted_content"],
+			forceReasoning: true,
+		});
+		// The chat leg keeps its own bucket.
+		expect(result.openaiCompatible).toEqual(
+			expect.objectContaining({ strictJsonSchema: false }),
+		);
+	});
+
+	it("keeps the portable reasoning level for both protocols", () => {
+		const result = routedOptions({ modelId: "gpt-6-luna" });
+
+		// No native reasoning control in any bucket, so the top-level level
+		// reaches chat (`reasoning_effort`) and Responses (`reasoning.effort`).
+		expect(reconcilePortableReasoning("medium", result)).toBe("medium");
+		expect(result.openai).not.toHaveProperty("reasoningEffort");
+		expect(result.openai).not.toHaveProperty("truncation");
+	});
+
+	it("forces reasoning for a deployment name the catalog marks as reasoning", () => {
+		expect(
+			routedOptions({ modelId: "my-luna", capabilities: ["text", "reasoning"] })
+				.openai,
+		).toMatchObject({
+			include: ["reasoning.encrypted_content"],
+			forceReasoning: true,
+		});
+	});
+
+	it.each([
+		"gpt-4o",
+		"gpt-5-chat-latest",
+		"gpt-5-chat",
+	])("does not force reasoning or encrypted content for %s", (modelId) => {
+		expect(routedOptions({ modelId }).openai).toEqual({
+			store: false,
+			strictJsonSchema: false,
+		});
+	});
+
+	it("writes nothing when the user chose Chat Completions", () => {
+		expect(
+			routedOptions({ modelId: "gpt-6-luna", apiProtocol: "openai-chat" }),
+		).not.toHaveProperty("openai");
+	});
+
+	it("writes nothing for providers that do not route to the Responses API", () => {
+		expect(
+			routedOptions({
+				providerId: "goodvision",
+				modelId: "gpt-6-luna",
+				metadata: { toolTransport: "auto" },
+			}),
+		).not.toHaveProperty("openai");
+	});
+});
+
 describe("composeAiSdkProviderOptions: alias bucket emission", () => {
 	it("emits only the camelCase bucket for a hyphenated openai-compatible provider id", () => {
 		const result = composeAiSdkProviderOptions(

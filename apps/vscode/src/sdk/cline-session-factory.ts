@@ -46,6 +46,7 @@ import { fetch, fetchWithoutIdleTimeouts } from "@/shared/net"
 import { type BedrockProviderConfig, buildBedrockProviderConfig } from "./bedrock-config"
 import { buildAgentHooks } from "./hooks-adapter"
 import { readTaskHistory, resolveDataDir } from "./legacy-state-reader"
+import { resolveOpenAICompatibleApiProtocol } from "./model-catalog/api-protocol"
 import type { ResolvedModelSelection } from "./model-catalog/contracts"
 import { nonNegativeFiniteNumber, positiveFiniteNumber, toSdkApiFormat } from "./model-catalog/model-values"
 import { parseProviderId } from "./model-catalog/provider-id"
@@ -1161,6 +1162,10 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 		// clobber the providers.json azure block core merges in downstream
 		// (buildProviderConfig spreads this session config over stored settings).
 		...(azureProviderConfig ?? {}),
+		// The OpenAI Compatible API setting, for consumers that build handlers
+		// straight from providerConfig (the compaction summarizer); core merges
+		// providers.json itself for the agent loop.
+		...resolveOpenAICompatibleApiProtocol(sdkProviderId),
 		providerId: sdkProviderId,
 		modelId,
 		...(apiKey ? { apiKey } : {}),

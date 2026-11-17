@@ -1,7 +1,14 @@
 import type { ApiConfiguration } from "@shared/api"
 import { StateManager } from "@/core/storage/StateManager"
 import { getProviderSettingsManager } from "../provider-migration"
-import type { AwsProviderConfig, EffectiveProviderConfig, GcpProviderConfig, ProviderId } from "./contracts"
+import { parseOpenAICompatibleApiProtocol, storesOpenAICompatibleApiProtocol } from "./api-protocol"
+import type {
+	AwsProviderConfig,
+	EffectiveProviderConfig,
+	GcpProviderConfig,
+	OpenAICompatibleApiProtocol,
+	ProviderId,
+} from "./contracts"
 import { toSdkProviderId } from "./sdk-provider-id"
 
 type AuthConfig = NonNullable<EffectiveProviderConfig["auth"]>
@@ -19,6 +26,7 @@ type ProviderSettingsLike = {
 	readonly aws?: AwsProviderConfig
 	readonly gcp?: GcpProviderConfig
 	readonly contextWindow?: number
+	readonly apiProtocol?: OpenAICompatibleApiProtocol
 	readonly auth?: AuthConfig
 	readonly extras?: ExtrasConfig
 }
@@ -215,6 +223,9 @@ function readProviderSettings(providerId: ProviderId): ConfigParts {
 			aws: readAws(settings),
 			gcp: readGcp(settings),
 			contextWindow: readPositiveInteger(settings.contextWindow),
+			apiProtocol: storesOpenAICompatibleApiProtocol(providerId)
+				? parseOpenAICompatibleApiProtocol(settings.protocol)
+				: undefined,
 			auth: readAuth(settings),
 			extras: isPlainRecord(settings.extras) ? settings.extras : undefined,
 		} satisfies ProviderSettingsLike
@@ -396,6 +407,8 @@ export function buildEffectiveProviderConfig(providerId: ProviderId): EffectiveP
 	// Ollama StateManager key is a migration fallback (the store mirrors writes
 	// to both).
 	assignIfDefined(merged, "contextWindow", providerSettings.contextWindow ?? stateConfig.contextWindow)
+	// providers.json only: there is no legacy state key for the API protocol.
+	assignIfDefined(merged, "apiProtocol", providerSettings.apiProtocol)
 	assignIfDefined(merged, "auth", stateConfig.auth ?? providerSettings.auth)
 	assignIfDefined(merged, "extras", mergeExtras(providerSettings.extras, stateConfig.extras))
 

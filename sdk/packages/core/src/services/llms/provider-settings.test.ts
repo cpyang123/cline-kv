@@ -89,6 +89,67 @@ describe("provider settings", () => {
 		});
 	});
 
+	describe("OpenAI Compatible API protocol", () => {
+		it.each([
+			"openai-chat",
+			"openai-responses",
+		] as const)("maps protocol %s to apiProtocol without rerouting to openai-native", (protocol) => {
+			const config = toProviderConfig({
+				provider: "openai-compatible",
+				model: "gpt-6-luna",
+				baseUrl: "https://example.openai.azure.com/openai/v1",
+				protocol,
+			});
+
+			expect(config.apiProtocol).toBe(protocol);
+			expect(config.routingProviderId).toBeUndefined();
+		});
+
+		it("leaves apiProtocol unset (Auto) when no protocol is stored", () => {
+			const config = toProviderConfig({
+				provider: "openai-compatible",
+				model: "gpt-6-luna",
+			});
+
+			expect(config).not.toHaveProperty("apiProtocol");
+			expect(config.routingProviderId).toBeUndefined();
+		});
+
+		it("accepts the extension's openai alias", () => {
+			expect(
+				toProviderConfig({ provider: "openai", protocol: "openai-responses" }),
+			).toMatchObject({ apiProtocol: "openai-responses" });
+		});
+
+		it("ignores protocols that are not an OpenAI wire protocol", () => {
+			const config = toProviderConfig({
+				provider: "openai-compatible",
+				protocol: "anthropic",
+			});
+
+			expect(config).not.toHaveProperty("apiProtocol");
+			expect(config.routingProviderId).toBeUndefined();
+		});
+
+		it("keeps client openai as the explicit openai-native escape hatch", () => {
+			expect(
+				toProviderConfig({ provider: "openai-compatible", client: "openai" })
+					.routingProviderId,
+			).toBe("openai-native");
+		});
+
+		it("still routes other providers' Responses protocol through openai-native", () => {
+			const config = toProviderConfig({
+				provider: "my-gateway",
+				protocol: "openai-responses",
+				baseUrl: "https://gateway.example/v1",
+			});
+
+			expect(config.routingProviderId).toBe("openai-native");
+			expect(config).not.toHaveProperty("apiProtocol");
+		});
+	});
+
 	it("keeps the provider default base URL when no apiLine is set", () => {
 		expect(toProviderConfig({ provider: "zai" })).toMatchObject({
 			baseUrl: "https://api.z.ai/api/paas/v4",

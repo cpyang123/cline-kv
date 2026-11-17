@@ -195,10 +195,37 @@ export function safeParseSettings(
 
 function shouldRouteThroughOpenAIResponses(
 	settings: ProviderSettings,
+	normalizedProviderId: string,
 ): boolean {
+	if (settings.client === "openai") {
+		return true;
+	}
+	// The built-in OpenAI Compatible provider picks Chat Completions or the
+	// Responses API itself (see `apiProtocol`). Rerouting it to openai-native
+	// would bypass that choice: the routed registration still resolves to the
+	// chat client, so the setting was silently ignored.
 	return (
-		settings.protocol === "openai-responses" || settings.client === "openai"
+		settings.protocol === "openai-responses" &&
+		normalizedProviderId !== BUILT_IN_PROVIDER.OPENAI_COMPATIBLE
 	);
+}
+
+/**
+ * The OpenAI Compatible API setting lives in the existing providers.json
+ * `protocol` key: absent means Auto, and the two OpenAI values already parse
+ * in every build, so older builds keep the key when they re-save the entry.
+ */
+function resolveOpenAICompatibleApiProtocol(
+	settings: ProviderSettings,
+	normalizedProviderId: string,
+): ProviderConfig["apiProtocol"] {
+	if (normalizedProviderId !== BUILT_IN_PROVIDER.OPENAI_COMPATIBLE) {
+		return undefined;
+	}
+	return settings.protocol === "openai-chat" ||
+		settings.protocol === "openai-responses"
+		? settings.protocol
+		: undefined;
 }
 
 export function toProviderConfig(
@@ -233,7 +260,7 @@ export function toProviderConfig(
 			: providerDefaults?.baseUrl);
 	const routingProviderId =
 		settings.routingProviderId ??
-		(shouldRouteThroughOpenAIResponses(settings) &&
+		(shouldRouteThroughOpenAIResponses(settings, normalizedProviderId) &&
 		normalizedProviderId !== BUILT_IN_PROVIDER.OPENAI_NATIVE
 			? BUILT_IN_PROVIDER.OPENAI_NATIVE
 			: undefined);
@@ -249,6 +276,10 @@ export function toProviderConfig(
 		providerId,
 		clientType: settings.client,
 		routingProviderId,
+		apiProtocol: resolveOpenAICompatibleApiProtocol(
+			settings,
+			normalizedProviderId,
+		),
 		modelId:
 			settings.model ??
 			providerDefaults?.modelId ??
